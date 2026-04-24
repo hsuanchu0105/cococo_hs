@@ -19,14 +19,15 @@ def create_random_sequential_circuit_dag(j: int, q: int, num_gates: int):
     """
     dag = DAGCircuit()
     qreg = QuantumRegister(q, "q")
-    dag.add_qreg(qreg)
+    dag.add_qreg(qreg) # add all wires in a quantum register
 
     pairs = []  # final return
     layers_int = []
 
     num_layers = (num_gates + j - 1) // j
 
-    if q < j // 2:
+    #! TODO is it a typo?
+    if q < j * 2:
         raise ValueError(
             "j is too large, cannot fit that many disjoint gates in a layer with q qubits"
         )

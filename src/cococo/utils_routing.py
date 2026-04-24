@@ -260,7 +260,7 @@ class BasicRouter:
                     g_temp_temp.remove_nodes_from(terminals_temp)
                     # find shortest path of t_p
                     try:
-                        path = self.valid_path_method()(g_temp_temp, t_p[0], t_p[1])
+                        path = self.valid_path_method()(g_temp_temp, t_p[0], t_p[1]) #Dijkstra 
                         paths_temp_lst.append(path)
                         tp_list.append(t_p)
                     except nx.NetworkXNoPath:
@@ -307,7 +307,7 @@ class BasicRouter:
                     else:
                         nearest_factory = min(
                             dist_factories, key=lambda k: len(dist_factories[k])
-                        )
+                        ) # min returns the key s.t. dist_factories has smallest value
                         path = dist_factories[nearest_factory]
                         paths_temp_lst.append(path)
                         tp_list.append(t_p)
@@ -463,7 +463,7 @@ class BasicRouter:
                 tuple[int, int] | tuple[tuple[int, int], tuple[int, int]],
                 list[tuple[int, int]],
             ]
-        ] = []
+        ] = [] # each layer is a dict, with gate as the key
 
         layers_cnot_t_prev = None
 
@@ -730,9 +730,10 @@ class TeleportationRouter(BasicRouter):
             layers_temp = layers[:k_lookahead]
             terminals = []
             for layer in layers_temp:
-                terminals += layers
+                # TODO double check whether it's layer or layers
+                terminals += layer
             qubits_k_lookahead = [t for outer in terminals for t in outer]
-            # remove those from vdp_cit which are not used, such that no tree is created for them
+            # remove those from vdp_dict which are not used, such that no tree is created for them
             vdp_dict_reduced = {}
             for key, val in vdp_dict.items():
                 if key[0] in qubits_k_lookahead or key[1] in qubits_k_lookahead:
@@ -766,14 +767,12 @@ class TeleportationRouter(BasicRouter):
             # choose some node on the path randomly
             flag = False
             pathcopy = path.copy()
-            path = path[
-                1:-1
-            ]  # remove last and first node from the list because those are logical data patches
+            path = path[1:-1]  # remove last and first node from the list because those are logical data patches
             random.shuffle(path)
             if steiner_init_type == "full_random":
                 for (
                     node_on_path
-                ) in path:  # loop in case a random node has  no other reachable nodes
+                ) in path:  # loop in case a random node has no other reachable nodes
                     # determine all reachable nodes from that chosen node
                     reachable_nodes = list(
                         nx.single_source_shortest_path_length(
@@ -787,6 +786,7 @@ class TeleportationRouter(BasicRouter):
                     continue  # skip this path if no reachable node found
                 # select a random reachable node
                 terminal_node = random.choice(reachable_nodes)
+                # TODO are these three lines redundant?
                 # determine the path between the node which is ensured on the path and the terminal
                 path_steiner = nx.dijkstra_path(
                     g_temp_temp, node_on_path, terminal_node
@@ -805,9 +805,7 @@ class TeleportationRouter(BasicRouter):
                 if paths_lst_temp:
                     path_steiner = min(paths_lst_temp, key=len)
             elif steiner_init_type == "on_path_random":
-                terminal_node = random.choice(
-                    path
-                )  # just choose a random terminal ON the path
+                terminal_node = random.choice(path)  # choose a random terminal ON the path
                 path_steiner = [
                     terminal_node
                 ]  # terminal on the path does not need an extended path, but list should not be empty, otherwise error.
@@ -903,7 +901,7 @@ class TeleportationRouter(BasicRouter):
                         node in g_temp_temp.nodes() and node not in path1 + path2
                     ):  # {terminal, path2[0]}
                         g_temp_temp.remove_node(node)
-            # find "neighborhood" of teh terminal
+            # find "neighborhood" of the terminal
             neighborhood = set(
                 nx.single_source_shortest_path_length(
                     g_temp_temp, terminal, cutoff=radius
@@ -943,7 +941,7 @@ class TeleportationRouter(BasicRouter):
             if paths_lst_temp:
                 path_terminal = min(paths_lst_temp, key=len)
 
-            # delete old entry and add new iwth updated key
+            # delete old entry and add new with updated key
             steiner_dct_update.pop(key_tree, None)
             if len(key_tree) == 3:
                 (a, b, terminal) = key_tree
@@ -1141,7 +1139,7 @@ class TeleportationRouter(BasicRouter):
             for key_candidate, (path1, path2) in candidate.items():
                 if len(key_candidate) == 3:
                     (a, b, terminal) = key_candidate
-                    # randomly choose whther we shift control to ancilla or target to ancilla
+                    # randomly choose whether we shift control to ancilla or target to ancilla
                     move_type = random.choice(["target", "control"])
                     move_type_lst_temp.update({(a, b, terminal): move_type})
                     if move_type == "target":
@@ -1267,7 +1265,7 @@ class TeleportationRouter(BasicRouter):
                     else:
                         raise RuntimeError("something wrong with subset steiner keys")
 
-                    # randomly choose whther we shift control to ancilla or target to ancilla
+                    # randomly choose whether we shift control to ancilla or target to ancilla
                     move_type = move_type_lst[key_subset]
                     if move_type == "target":
                         for j, next_layer in enumerate(next_layers_copy):
@@ -1370,7 +1368,7 @@ class TeleportationRouter(BasicRouter):
             )
 
         #!Try to move re-allocated qubits back into the left gaps (does not need to be the original position, in case some other gap is closer)
-        #!todo priority ordering of the danger_qubits (those which appear earlier in upcoming layers must be attempted to be moved back first)
+        #!TODO priority ordering of the danger_qubits (those which appear earlier in upcoming layers must be attempted to be moved back first)
         danger_qubits_copy = danger_qubits.copy()
         logical_pos_temp = list(layout.values())
         next_layers_copy = layers.copy()
@@ -1393,18 +1391,19 @@ class TeleportationRouter(BasicRouter):
             for (qubit, time) in danger_qubits_copy.items()
             if qubit not in flattened_vdp_dict_current
         }
+
         danger_qubits_idling = {
             qubit: time for (qubit, time) in danger_qubits_idling.items() if time <= 0
         }
         idle_move_labels = []
         vdp_dict = schedule_temp["vdp_dict"]
         for danger_qubit in danger_qubits_idling.keys():
-            # todo order the available gaps regarding how close they are to the current danger_qubit
+            # TODO order the available gaps regarding how close they are to the current danger_qubit
             # go through gaps and take the one to which a path is available
             path_idle = None
             for (
                 gap
-            ) in available_gaps:  #!todo order available_gaps according to distance
+            ) in available_gaps:  #!TODO order available_gaps according to distance
 
                 # skip the gap if it is currently occupied by some path
                 flag_skip = False
@@ -1453,7 +1452,7 @@ class TeleportationRouter(BasicRouter):
                     del danger_qubits_copy[danger_qubit]
                     available_gaps.remove(gap)
                     label_idle = f"idle_{danger_qubit}_to_{gap}"
-                    vdp_dict.update({label_idle: path_idle})
+                    vdp_dict.update({label_idle: path_idle}) #! TODO now we have string keys, will be troubled if we call this function again because of line 1378
                     idle_move_labels.append(label_idle)
                     logical_pos_temp = self.replace_pos(
                         logical_pos_temp, danger_qubit, gap
@@ -1489,8 +1488,8 @@ class TeleportationRouter(BasicRouter):
         # danger_qubits += danger_qubits_temp #those temp danger qubits have k_lookahead as timelabel
         danger_qubits |= danger_qubits_temp
         available_gaps += available_gaps_temp
-
-        # if an element appears both in danger_qubits and available_gaps, this hints to the case that a qubit in a danger position was moved again. hence delete the double elemts
+        
+        # if an element appears both in danger_qubits and available_gaps, this hints to the case that a qubit in a danger position was moved again. hence delete the double elements
         shared_elements = set(danger_qubits.keys()) & set(available_gaps)
         danger_qubits = {
             qubit: time
@@ -2017,7 +2016,7 @@ class TeleportationRouter(BasicRouter):
                         ]
                         danger_gap_list = []
                         for label_idle in new_idle_moves:
-                            parts = label_idle.split("_")
+                            parts = label_idle.split("_") # label_idle = f"idle_{danger_qubit}_to_{gap}"
                             danger_qubit = parts[1]
                             gap = parts[3]
                             danger_qubit = tuple(
@@ -2054,7 +2053,7 @@ class TeleportationRouter(BasicRouter):
                             dag_helper.extract_layer_from_dag(dag, layout, layer)
                         )
 
-                # reduce the teimstamps in dagner_qubits by k_lookahead (because initialized this way), but in the previous loop we avoided the stepwise reduction of the time labes
+                # reduce the time stamps in danger_qubits by k_lookahead (because initialized this way), but in the previous loop we avoided the stepwise reduction of the time labels
                 danger_qubits = {
                     qubit: time - k_lookahead + 1
                     for (qubit, time) in danger_qubits.items()
