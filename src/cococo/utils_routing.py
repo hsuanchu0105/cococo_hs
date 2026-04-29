@@ -375,6 +375,7 @@ class BasicRouter:
 
         return vdp_dict, terminal_pairs_remainder, factory_times_temp
     ''' 
+    # penalized version 
     def find_max_vdp_set(
         self,
         layer: list[tuple[pos, pos] | pos],
@@ -388,6 +389,7 @@ class BasicRouter:
         """
 
         path_num = 5
+        path_srch = 3
         
 
         factory_times_temp = factory_times.copy()
@@ -415,6 +417,61 @@ class BasicRouter:
             flattened_terminals.copy() + self.factory_pos.copy()
         )  # was using self.flattened before, which was problem because not updated after logical repositioning
 
+
+        node_penalty = collections.defaultdict(int)
+
+        for t_p in layer.copy():
+
+            # cnot
+            if isinstance(t_p[0], tuple) and isinstance(t_p[1], tuple):
+
+                g_temp_temp = g_temp.copy()
+                # ADAPT THE GRAPH AND REMOVE ALL LOGICAL DATA PATCHES DESPITE THE t_p
+                if logical_pos is None:
+                    nodes_to_remove = [
+                        x for x in self.logical_pos if x != t_p[0] and x != t_p[1]
+                    ]
+                else:
+                    nodes_to_remove = [
+                        x for x in logical_pos if x != t_p[0] and x != t_p[1]
+                    ]
+                g_temp_temp.remove_nodes_from(nodes_to_remove)
+
+                if dct_qubits[t_p[0]] or dct_qubits[t_p[1]]:
+                    flag_problem = True
+                    break
+                terminals_temp = [
+                    pair
+                    for pair in flattened_terminals_and_factories.copy()
+                    if pair != t_p[0] and pair != t_p[1]
+                ]
+                terminals_temp = list(set(terminals_temp))
+                g_temp_temp.remove_nodes_from(terminals_temp)
+                # find shortest path of t_p
+                try:
+                    if self.valid_path == "cc":
+                        if (t_p[0], t_p[1]) in g_temp_temp.edges():
+                            g_temp_temp.remove_edge(t_p[0], t_p[1])
+                    
+                    path_generator = nx.shortest_simple_paths(
+                    g_temp_temp, t_p[0], t_p[1]
+                    )
+
+                    paths_temp = []
+                    for path in path_generator:
+                        paths_temp.append(path)
+                        if len(paths_temp) >= path_num:
+                            break
+
+                    # update penalty
+                    for path in paths_temp:
+                        for node in path[1:-1]:
+                            node_penalty[node] += 1
+
+                except nx.NetworkXNoPath:
+                    # skip the t_p if no path exists
+                    pass  # therefore just pass
+
         while (
             len(terminal_pairs_current) > 0 and flag_problem is False
         ):  # noqa: PLR1702
@@ -422,7 +479,6 @@ class BasicRouter:
             tp_list: list[tuple[int, int] | tuple[tuple[int, int], tuple[int, int]]] = (
                 []
             )  # same order, actually redundant but error otherwise
-            node_penalty = collections.defaultdict(int)
 
             for t_p in terminal_pairs_current:
   
@@ -464,15 +520,9 @@ class BasicRouter:
                         path_candidates = []
                         for path in path_generator:
                             path_candidates.append(path)
-                            if len(path_candidates) >= path_num:
+                            if len(path_candidates) >= path_srch:
                                 break
 
-                        # update penalty
-                        for path in path_candidates:
-                            for node in path[1:-1]:
-                                node_penalty[node] += 1
-
-                        
                         paths_cand_dict[t_p] = path_candidates
                         tp_list.append(t_p)
                         
@@ -523,6 +573,7 @@ class BasicRouter:
                             dist_factories, key=lambda k: len(dist_factories[k])
                         ) # min returns the key s.t. dist_factories has smallest value
                         path = dist_factories[nearest_factory]
+                        #! TODO 
                         paths_cand_dict.append(path)
                         tp_list.append(t_p)
 
@@ -540,7 +591,7 @@ class BasicRouter:
             if all(all_t) and len(paths_cand_dict) == 0:
                 flag_problem = True
 
-            for key_gate, path_candidates in paths_cand_dict.items():
+            for key_gate, _ in paths_cand_dict.items():
                 if paths_cand_dict[key_gate] and not flag_problem:
 
                     opt_path = min(
