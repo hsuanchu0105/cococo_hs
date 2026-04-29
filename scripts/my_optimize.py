@@ -90,4 +90,5 @@ schedule, _ = router.optimize_layers(
         reduce_init_steiner = False,
         stimtest = True)
 
-
+print("Len of schedule with teleport router: ", len(schedule))
+print("Reduction Delta: ", len(vdp_layers) - len(schedule))
