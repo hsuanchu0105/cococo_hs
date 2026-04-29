@@ -193,7 +193,7 @@ class BasicRouter:
         factory_times: dict[pos, int],
     ):
         """
-        Finds the approximation for a vdp set for some given layer and returns the routing as well as a potential remainder.
+        Finds the approximation for a vdp set for a given layer and returns the routing as well as a potential remainder.
 
         If logical_pos is given as input, you use the input instead of the self.logical_pos
         """
@@ -412,7 +412,7 @@ class BasicRouter:
                 IndexError
             ):  # if no further initial_layer[i] available but still the previous layer was split
                 initial_layers.append(remainder)
-            layers = self.split_layer_terminal_pairs(initial_layers[i])
+            layers = self.split_layer_terminal_pairs(initial_layers[i]) # Split terminal_pairs into layers of disjoint qubit support
             if len(layers) == 1:
                 # adding remainder to initial_layers[0] caused no conflict, so we are finished
                 break
@@ -463,7 +463,7 @@ class BasicRouter:
                 tuple[int, int] | tuple[tuple[int, int], tuple[int, int]],
                 list[tuple[int, int]],
             ]
-        ] = [] # each layer is a dict, with gate as the key
+        ] = [] # each layer is a dict, key: gate, value: path
 
         layers_cnot_t_prev = None
 
@@ -814,9 +814,9 @@ class TeleportationRouter(BasicRouter):
                     "steiner_init_type must be on_path_random or full_random."
                 )
             # add to list
-            if isinstance(key[0], tuple):  # if CNOT
+            if isinstance(key[0], tuple):  # if CNOT key: tuple[pos, pos], (terminal_node, ) makes it a tuple
                 tup = key + (terminal_node,)
-            elif isinstance(key[0], int):  # if T gate
+            elif isinstance(key[0], int):  # if T gate, key: pos
                 tup = (key, terminal_node)
             steiner_dct.update({tup: [pathcopy, path_steiner]})
             # also remove the nodes from the graph such that no overlapping steiner trees can be generated
@@ -1504,6 +1504,7 @@ class TeleportationRouter(BasicRouter):
         self.logical_pos_temp = logical_pos_temp.copy()
         schedule_temp["logical_pos"] = self.logical_pos.copy()
         schedule_temp["idle_move_label"] = idle_move_labels.copy()
+        # should I update schedule_temp["layout"] here? 
         layers = next_layers_copy.copy()
         layout = layout_mod.copy()
 

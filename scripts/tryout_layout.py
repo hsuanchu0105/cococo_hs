@@ -13,6 +13,7 @@ import plotting
 
 
 
+
 layout_type = "triple"
 m = 4
 n = 4
@@ -25,25 +26,68 @@ t=2
 
 
 print(g)
-#print(data_qubit_locs)
-print("factory ring: ", factory_ring)
+print("data qubit location", data_qubit_locs)
+
+#print("factory ring: ", factory_ring)
 
 #plotting.plot_lattice_paths(g, {}, {}, layout, factories, size = (18,8))
 
 
 q = len(data_qubit_locs)
+print("number of data qubits: ", q)
 j = 8
 num_gates = q*2
+print("number of gates: ", num_gates)
+
 # j gates per layer on q qubits 
 # pairs indicate the qubit index (0, ..., q)
 dag, pairs = circuit_construction.create_random_sequential_circuit_dag(j, q, num_gates, )
-print("pairs: ", pairs)
+#print("pairs: ", pairs)
 
 # terminal pairs indicate the 2d coordinates 
 terminal_pairs = layouts.translate_layout_circuit(pairs, layout) #let's stick to the simple layout
-print("terminal pairs: ", terminal_pairs)
+#print("terminal pairs: ", terminal_pairs)
 
 router = utils.BasicRouter(g, data_qubit_locs, factories, valid_path = "cc", t=t, metric = "exact", use_dag = True)
+# each layer has disjoint logical support, however it doesn't guarantee that all those gates can be physically routed at the same time on the lattice
 layers = router.split_layer_terminal_pairs(terminal_pairs)
 vdp_layers, _ = router.find_total_vdp_layers_dyn(layers, data_qubit_locs, router.factory_times, layout, testing = True)
 print("Len of schedule without teleportation: ", len(vdp_layers))
+
+
+router = utils.TeleportationRouter(g, data_qubit_locs, factories, valid_path="cc", t=t, metric="exact", use_dag = True, seed = 49218)
+layers = router.split_layer_terminal_pairs(terminal_pairs)
+
+max_iters = 100
+T_start = 100.0
+T_end = 0.1
+alpha = 0.95
+t=4 #mock value for cnot circuit
+radius = 10
+k_lookahead = 5
+metric = "exact"
+
+steiner_init_type = "full_random"
+jump_harvesting = True
+stimtest = True
+
+reduce_steiner = True
+idle_move_type = "later"
+
+schedule, _ = router.optimize_layers(        
+        terminal_pairs,
+        layout,
+        max_iters,
+        T_start,
+        T_end,
+        alpha,
+        radius = radius,
+        k_lookahead = k_lookahead,
+        steiner_init_type = steiner_init_type,
+        jump_harvesting = jump_harvesting,
+        reduce_steiner = reduce_steiner,
+        idle_move_type = idle_move_type,
+        reduce_init_steiner = False,
+        stimtest = True)
+
+
