@@ -21,12 +21,12 @@ factories = []
 remove_edges = False
 g, data_qubit_locs, factory_ring = layouts.gen_layout_scalable(layout_type, m, n, factories, remove_edges)
 layout = {i: j for i,j in enumerate(data_qubit_locs)}
-t=2 
+t=2
 
+print("layout: ", layout)
 
-
-print(g)
-print("data qubit location", data_qubit_locs)
+#print(g)
+#print("data qubit location", data_qubit_locs)
 
 #print("factory ring: ", factory_ring)
 
@@ -36,17 +36,19 @@ print("data qubit location", data_qubit_locs)
 q = len(data_qubit_locs)
 print("number of data qubits: ", q)
 j = 8
-num_gates = q*2
-print("number of gates: ", num_gates)
+#num_gates = q*2
+num_gates = 10
+
 
 # j gates per layer on q qubits 
 # pairs indicate the qubit index (0, ..., q)
-dag, pairs = circuit_construction.create_random_sequential_circuit_dag(j, q, num_gates, )
-#print("pairs: ", pairs)
+dag, pairs = circuit_construction.create_random_sequential_circuit_dag(j, q, num_gates, ) # at least num_gates gates
+print("pairs: ", pairs)
+print("number of gates: ", len(pairs))
 
 # terminal pairs indicate the 2d coordinates 
 terminal_pairs = layouts.translate_layout_circuit(pairs, layout) #let's stick to the simple layout
-#print("terminal pairs: ", terminal_pairs)
+print("terminal pairs: ", terminal_pairs)
 
 router = utils.BasicRouter(g, data_qubit_locs, factories, valid_path = "cc", t=t, metric = "exact", use_dag = True)
 # each layer has disjoint logical support, however it doesn't guarantee that all those gates can be physically routed at the same time on the lattice
@@ -92,3 +94,18 @@ schedule, _ = router.optimize_layers(
 
 print("Len of schedule with teleport router: ", len(schedule))
 print("Reduction Delta: ", len(vdp_layers) - len(schedule))
+
+from IPython.display import HTML
+from cococo.animation_routing_html import make_clean_routing_html_animation
+
+anim = make_clean_routing_html_animation(
+    g,
+    schedule,
+    initial_layout=layout,
+    factories=factories,
+    figsize=(18, 8),
+    interval=900,
+    save_path="clean_routing_animation.html",
+)
+
+HTML(anim.to_jshtml())
