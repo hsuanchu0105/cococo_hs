@@ -1,4 +1,4 @@
-
+import copy 
 # penalized version
 
 def find_max_vdp_set(
@@ -573,9 +573,6 @@ def perturbation(self, teleport_dct: dict, radius: int, vdp_dict: dict):
 
             if path_terminal is None:
                 continue
-            
-
-
 
             # delete old entry and add new with updated key
             teleport_dct_update.pop(key_tree, None)
@@ -681,15 +678,16 @@ def perturbation(self, teleport_dct: dict, radius: int, vdp_dict: dict):
             g_temp_temp = g_temp.copy()
         return teleport_dct_update_sec, g_temp_temp
 
+
 def update_layers(self, layers, old_pos, new_pos):
     """
     update old_pos to new_pos in layers 
     """
-    for j, layer in enumerate(layers):  
-        layers[j] = self.replace_pos(
-            layer, old_pos, new_pos
-        )
-    return layers 
+    result = []
+    for layer in layers:  
+        result.append( self.replace_pos(layer, old_pos, new_pos) )
+    return result
+
 def calculate_cost(self, metric, layers, logical_pos, factory_times, layout):
     cost = 0
     if metric == "crossing":
@@ -781,7 +779,7 @@ def run_annealing(
             best_schedule
             cost_history
             best_move_type_lst
-            steiner_history
+            teleport_history
             graph_history
 
         """
@@ -931,3 +929,120 @@ def run_annealing(
             teleport_history,
             graph_history,
         )
+
+
+def qubits_in_vdp_key(key):
+    if isinstance(key, str):
+        return []
+
+    if isinstance(key[0], tuple):
+        # CNOT key: ((x1, y1), (x2, y2))
+        return [key[0], key[1]]
+
+    if isinstance(key[0], int):
+        # T-gate key: (x, y)
+        return [key]
+
+    raise RuntimeError(f"Unexpected vdp key: {key}")
+
+
+def occupied_nodes_from_vdp(vdp_dict):
+    occupied = set()
+    for key, path in vdp_dict.items():
+        if isinstance(key, str): # idle 
+            occupied.update(path[1:])
+        elif isinstance(key[0], tuple): # CNOT
+            occupied.update(path[1:-1])
+        elif isinstance(key[0], int): # T 
+            occupied.update(path[1:])
+        else:
+            raise RuntimeError(f"Unexpected VDP key: {key}")
+    return occupied
+
+def occupied_nodes_from_steiner(steiner_dct):
+    occupied = set()
+
+    if steiner_dct is None:
+        return occupied
+
+    for key, (path1, path2) in steiner_dct.items():
+        occupied.update(path1)
+        occupied.update(path2)
+
+    return occupied
+
+def initialize_idle_moves(
+    self,
+    vdp_dict: dict,
+    steiner_dct: dict,
+    layout: dict,
+    max_idle_moves: int | None = None,
+):
+    """
+    Initialize random idle-qubit teleportation moves.
+
+    Returns:
+        idle_move_dct:
+            {
+                ("idle", q, terminal): path_idle
+            }
+    """
+    logical_positions = list(layout.values())
+
+    active_qubits = set()
+    
+    
+    for key in vdp_dict:
+        active_qubits.update(qubits_in_vdp_key(key))
+
+    idle_qubits = [
+        q for q in logical_positions
+        if q not in active_qubits
+    ]
+
+    random.shuffle(idle_qubits)
+
+    if max_idle_moves is not None:
+        idle_qubits = idle_qubits[:max_idle_moves]
+
+    occupied = set()
+    occupied.update(occupied_nodes_from_vdp(vdp_dict))
+    occupied.update(occupied_nodes_from_steiner(steiner_dct)) 
+
+    
+    idle_move_dct = {}
+
+    used_idle_paths = set()
+
+    for q in idle_qubits:
+        g_temp = self.g.copy()
+
+        # Remove factories.
+        g_temp.remove_nodes_from(self.factory_pos)
+
+        # Remove occupied current-layer routing/Steiner nodes.
+        g_temp.remove_nodes_from(occupied)
+        g_temp.remove_nodes_from(used_idle_paths)
+
+        # Remove all other logical qubits.
+        for pos in logical_positions:
+            if pos != q and pos in g_temp.nodes:
+                g_temp.remove_node(pos)
+
+        if q not in g_temp.nodes:
+            continue
+
+        reachable = list(nx.single_source_shortest_path_length(g_temp, q).keys())
+
+        if not reachable:
+            continue
+
+        terminal = random.choice(reachable)
+        path_idle = nx.dijkstra_path(g_temp, q, terminal)
+
+        idle_move_dct[("idle", q, terminal)] = path_idle
+
+        # Prevent other idle moves from overlapping this one.
+        used_idle_paths.update(path_idle)
+
+    return idle_move_dct

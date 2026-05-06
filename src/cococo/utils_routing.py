@@ -25,7 +25,7 @@ handler.setFormatter(
 logger.handlers = [handler]
 
 
-pos = list[int, int]
+pos = list[int, int] #! TODO should this be tuple[int, int]
 lock_penalty = 200
 
 
