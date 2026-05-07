@@ -1046,3 +1046,203 @@ def initialize_idle_moves(
         used_idle_paths.update(path_idle)
 
     return idle_move_dct
+
+# perturbation second tryout
+def perturbation(self, steiner_dct: dict, radius: int, vdp_dict: dict):
+        """
+        Computes a perturbation of a given collection of trees within a given radius of edges around the current terminal.
+
+        For each tree in steiner_dct a new location of the 3rd terminal is updated randomly.
+        """
+        if self.logical_pos_temp is None:
+            raise RuntimeError(
+                "Need to initialize logical pos temp properly in a summarizing method."
+            )
+        g_temp = self.g.copy()
+        g_temp.remove_nodes_from(self.factory_pos)
+        g_temp.remove_nodes_from(
+            self.logical_pos_temp
+        )  # logical pos temp must be successively updated in a loop where you apply multiple perturbations
+
+        steiner_dct_update = steiner_dct.copy()
+        # used_nodes = set()
+        new_terminal = None
+
+        for key_tree, (path1, path2) in steiner_dct.items():
+
+            # determine whether tree corresponds to a CNOT or T gate
+            if len(key_tree) == 3:
+                (a, b, terminal) = key_tree
+                other_paths = [
+                    pos
+                    for keyy, path in steiner_dct_update.items()
+                    if keyy != (a, b, terminal)
+                    for pos in path[0][1:-1]
+                ]
+                other_paths += [
+                    pos
+                    for keyy, path in steiner_dct_update.items()
+                    if keyy != (a, b, terminal)
+                    for pos in path[1]
+                ]  # not 1:-1 because 3rd terminal is not allowed to be part of other terminal path
+            elif len(key_tree) == 2:
+                (a, terminal) = key_tree
+                other_paths = [
+                    pos
+                    for keyy, path in steiner_dct_update.items()
+                    if keyy != (a, terminal)
+                    for pos in path[0][1:-1]
+                ]
+                other_paths += [
+                    pos
+                    for keyy, path in steiner_dct_update.items()
+                    if keyy != (a, terminal)
+                    for pos in path[1]
+                ]
+            else:
+                raise RuntimeError(
+                    "Something is wrong with the allocation of keys in the steiner_dict"
+                )
+
+            # a terminal can be placed on the path. in this case you are NOT allowed to remove it! the above somehow sometimes add terminal, hence remove it again
+            if terminal in other_paths:
+                other_paths.remove(terminal)
+            if path2[0] in other_paths:
+                other_paths.remove(path2[0])
+
+            g_temp_temp = g_temp.copy()
+            g_temp_temp.remove_nodes_from(other_paths)
+
+            # remove nodes from vdp dict (the tree is not allowed to be on or cross another path)
+            for path_label, path in vdp_dict.items():
+                if isinstance(path_label, str):
+                    nodes_to_delete = path[1:]  # for idle move you need to delete more
+                elif isinstance(path_label[0], tuple):  # cnot
+                    nodes_to_delete = path[1:-1]
+                elif isinstance(path_label[0], int):  # t
+                    nodes_to_delete = path[1:]
+                for node in nodes_to_delete:
+                    if (
+                        node in g_temp_temp.nodes() and node not in path1 + path2
+                    ):  # {terminal, path2[0]}
+                        g_temp_temp.remove_node(node)
+            # find "neighborhood" of teh terminal
+            neighborhood = set(
+                nx.single_source_shortest_path_length(
+                    g_temp_temp, terminal, cutoff=radius
+                ).keys()
+            )
+            # the single source shortest path,... ensures that only reachable nodes are included
+            # choose one of them
+            if len(neighborhood) == 1:  # if only one neighbor, i.e. the terminal itself
+                # new_terminal = None #to skip the updating of the root node below.
+                break
+            while True:
+                new_terminal = random.choice(list(neighborhood))
+                if new_terminal == terminal:  # do not want same terminal again
+                    continue
+                try:
+                    path_terminal = nx.dijkstra_path(
+                        g_temp_temp, path2[0], new_terminal
+                    )  # path2[0] is the connecting node on the path
+                except nx.NetworkXNoPath:
+                    warnings.warning(
+                        "If this is called you need to check why this is happening."
+                    )
+                if path_terminal:
+                    break
+
+            #!TODO should i skip this since we do it globally afterwards again?
+            # (A) loop to possibly find shorter path_terminal
+            paths_lst_temp = []  # collect all paths from path1[1:-1] to new_terminal
+            for node_on_path in path1[1:-1]:
+                try:
+                    path_temp = nx.dijkstra_path(
+                        g_temp_temp, node_on_path, new_terminal
+                    )
+                    paths_lst_temp.append(path_temp)
+                except nx.NetworkXNoPath:
+                    pass
+            if paths_lst_temp:
+                path_terminal = min(paths_lst_temp, key=len)
+
+            # delete old entry and add new iwth updated key
+            steiner_dct_update.pop(key_tree, None)
+            if len(key_tree) == 3:
+                (a, b, terminal) = key_tree
+                new_key_tree = (a, b, new_terminal)
+            elif len(key_tree) == 2:
+                (a, terminal) = key_tree
+                new_key_tree = (a, new_terminal)
+            steiner_dct_update[new_key_tree] = (path1, path_terminal)
+            # remove_branch_nodes += path_terminal
+
+        # it is possible that (A) does not capture everything, as the terminal path may change in a later iteration and thus make even shorter paths possible.
+        if (
+            new_terminal is not None
+        ):  # if the neighborhood has 1 item only, the above breaks. then we do not want to do this reduction.
+            steiner_dct_update_second = steiner_dct_update.copy()
+            for key_tree, (path1, path2) in steiner_dct_update.items():
+                if len(key_tree) == 3:
+                    (a, b, terminal) = key_tree
+                elif len(key_tree) == 2:
+                    (a, terminal) = key_tree
+                else:
+                    raise ValueError("steiner dct keys are wrong.")
+                other_paths = [
+                    pos
+                    for keyy, path in steiner_dct_update_second.items()
+                    if keyy != key_tree
+                    for pos in path[0][1:-1]
+                ]
+                other_paths += [
+                    pos
+                    for keyy, path in steiner_dct_update_second.items()
+                    if keyy != key_tree
+                    for pos in path[1]
+                ]
+                if terminal in other_paths:
+                    other_paths.remove(terminal)
+                if path2[0] in other_paths:
+                    other_paths.remove(path2[0])
+                if terminal in other_paths:
+                    other_paths.remove(terminal)
+                g_temp_temp = g_temp.copy()
+                g_temp_temp.remove_nodes_from(other_paths)
+                for path_label, path in vdp_dict.items():
+                    if isinstance(path_label, str):
+                        nodes_to_delete = path[
+                            1:
+                        ]  # for idle move you need to delete more
+                    else:
+                        nodes_to_delete = path[1:-1]
+                    for node in nodes_to_delete:
+                        if (
+                            node in g_temp_temp.nodes() and node not in path1 + path2
+                        ):  # {terminal, path2[0]}:
+                            g_temp_temp.remove_node(node)
+                paths_lst_temp = (
+                    []
+                )  # collect all paths from path1[1:-1] to new_terminal
+                for node_on_path in path1[1:-1]:
+                    try:
+                        path_temp = nx.dijkstra_path(
+                            g_temp_temp, node_on_path, terminal
+                        )
+                        paths_lst_temp.append(path_temp)
+                    except nx.NetworkXNoPath:
+                        pass
+                if paths_lst_temp:
+                    path_terminal = min(paths_lst_temp, key=len)
+                    if len(key_tree) == 3:
+                        (a, b, terminal) = key_tree
+                        new_key_tree = (a, b, terminal)
+                    elif len(key_tree) == 2:
+                        (a, terminal) = key_tree
+                        new_key_tree = (a, terminal)
+                    steiner_dct_update_second.pop(key_tree, None)
+                    steiner_dct_update_second[new_key_tree] = (path1, path_terminal)
+        if new_terminal is None:
+            steiner_dct_update_second = steiner_dct_update
+            g_temp_temp = g_temp.copy()
+        return steiner_dct_update_second, g_temp_temp

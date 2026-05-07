@@ -12,6 +12,7 @@ import pickle
 from datetime import datetime
 import cococo.internal_testing as tst
 import cococo.dag_helper as dag_helper
+import copy 
 
 import sys
 import logging
@@ -27,6 +28,7 @@ logger.handlers = [handler]
 
 pos = list[int, int] #! TODO should this be tuple[int, int]
 lock_penalty = 200
+max_idle_teleport = 2
 
 
 class BasicRouter:
@@ -823,69 +825,193 @@ class TeleportationRouter(BasicRouter):
             g_temp.remove_nodes_from(path_steiner)
         return steiner_dct
 
-    def perturbation(self, steiner_dct: dict, radius: int, vdp_dict: dict):
+    
+
+    def initialize_idle_moves(
+        self,
+        vdp_dict: dict,
+        steiner_dct: dict,
+        layout: dict,
+        max_idle_moves: int | None = None,
+    ):
+        """
+        Initialize random idle-qubit teleportation moves.
+
+        Returns:
+            idle_move_dct:
+                {
+                    ("idle", q, terminal): path_idle
+                }
+        """
+        def qubits_in_vdp_key(key):
+            if isinstance(key, str):
+                return []
+
+            if isinstance(key[0], tuple):
+                # CNOT key: ((x1, y1), (x2, y2))
+                return [key[0], key[1]]
+
+            if isinstance(key[0], int):
+                # T-gate key: (x, y)
+                return [key]
+
+            raise RuntimeError(f"Unexpected vdp key: {key}")
+
+
+        def occupied_nodes_from_vdp(vdp_dict):
+            occupied = set()
+            for key, path in vdp_dict.items():
+                if isinstance(key, str): # idle 
+                    occupied.update(path[1:])
+                elif isinstance(key[0], tuple): # CNOT
+                    occupied.update(path[1:-1])
+                elif isinstance(key[0], int): # T 
+                    occupied.update(path[1:])
+                else:
+                    raise RuntimeError(f"Unexpected VDP key: {key}")
+            return occupied
+
+        def occupied_nodes_from_steiner(steiner_dct):
+            occupied = set()
+
+            if steiner_dct is None:
+                return occupied
+
+            for key, (path1, path2) in steiner_dct.items():
+                occupied.update(path1)
+                occupied.update(path2)
+
+            return occupied
+        
+        logical_positions = list(layout.values())
+
+        active_qubits = set()
+        
+        
+        for key in vdp_dict:
+            active_qubits.update(qubits_in_vdp_key(key))
+
+        idle_qubits = [
+            q for q in logical_positions
+            if q not in active_qubits
+        ]
+
+        random.shuffle(idle_qubits)
+
+        if max_idle_moves is not None:
+            idle_qubits = idle_qubits[:max_idle_moves]
+
+        occupied = set()
+        occupied.update(occupied_nodes_from_vdp(vdp_dict))
+        occupied.update(occupied_nodes_from_steiner(steiner_dct)) 
+
+        
+        idle_move_dct = {}
+
+        used_idle_paths = set()
+
+        for q in idle_qubits:
+            g_temp = self.g.copy()
+
+            # Remove factories.
+            g_temp.remove_nodes_from(self.factory_pos)
+
+            # Remove occupied current-layer routing/Steiner nodes.
+            g_temp.remove_nodes_from(occupied)
+            g_temp.remove_nodes_from(used_idle_paths)
+
+            # Remove all other logical qubits.
+            for pos in logical_positions:
+                if pos != q and pos in g_temp.nodes:
+                    g_temp.remove_node(pos)
+
+            if q not in g_temp.nodes:
+                continue
+
+            reachable = list(nx.single_source_shortest_path_length(g_temp, q).keys())
+
+            if not reachable:
+                continue
+
+            terminal = random.choice(reachable)
+            path_idle = nx.dijkstra_path(g_temp, q, terminal)
+
+            idle_move_dct[("idle", q, terminal)] = (path_idle, None)
+
+            # Prevent other idle moves from overlapping this one.
+            used_idle_paths.update(path_idle)
+
+        return idle_move_dct
+
+    
+
+    def perturbation(self, teleport_dct: dict, radius: int, vdp_dict: dict):
         """
         Computes a perturbation of a given collection of trees within a given radius of edges around the current terminal.
 
         For each tree in steiner_dct a new location of the 3rd terminal is updated randomly.
         """
+        def flattened_paths(path_pair):
+            path1, path2 = path_pair
+            nodes = set()
+            if path1 is not None:
+                nodes.update(path1[1:-1]) #! TODO check if we can ignore the logical endpoints 
+            if path2 is not None:
+                nodes.update(path2)
+            return nodes
         if self.logical_pos_temp is None:
             raise RuntimeError(
                 "Need to initialize logical pos temp properly in a summarizing method."
             )
         g_temp = self.g.copy()
         g_temp.remove_nodes_from(self.factory_pos)
-        g_temp.remove_nodes_from(
-            self.logical_pos_temp
-        )  # logical pos temp must be successively updated in a loop where you apply multiple perturbations
+        #g_temp.remove_nodes_from(
+        #    self.logical_pos_temp
+        #)  # logical pos temp must be successively updated in a loop where you apply multiple perturbations
 
-        steiner_dct_update = steiner_dct.copy()
+        teleport_dct_update = teleport_dct.copy()
         # used_nodes = set()
         new_terminal = None
 
-        for key_tree, (path1, path2) in steiner_dct.items():
+        for key_tree, (path1, path2) in teleport_dct.items():
 
-            # determine whether tree corresponds to a CNOT or T gate
-            if len(key_tree) == 3:
-                (a, b, terminal) = key_tree
-                other_paths = [
-                    pos
-                    for keyy, path in steiner_dct_update.items()
-                    if keyy != (a, b, terminal)
-                    for pos in path[0][1:-1]
-                ]
-                other_paths += [
-                    pos
-                    for keyy, path in steiner_dct_update.items()
-                    if keyy != (a, b, terminal)
-                    for pos in path[1]
-                ]  # not 1:-1 because 3rd terminal is not allowed to be part of other terminal path
+            is_idle = isinstance(key_tree, tuple) and len(key_tree) == 3 and key_tree[0] == "idle"
+
+            g_temp_temp = g_temp.copy()
+            # determine whether tree corresponds to an idle, a CNOT or T gate 
+            if is_idle:
+                _, q, terminal = key_tree
+                g_temp_temp.remove_nodes_from(
+                    [x for x in self.logical_pos_temp if x != q]
+                )
+            elif len(key_tree) == 3:
+                (a, b, terminal) = key_tree 
+                g_temp_temp.remove_nodes_from(
+                    [x for x in self.logical_pos_temp]
+                )
             elif len(key_tree) == 2:
                 (a, terminal) = key_tree
-                other_paths = [
-                    pos
-                    for keyy, path in steiner_dct_update.items()
-                    if keyy != (a, terminal)
-                    for pos in path[0][1:-1]
-                ]
-                other_paths += [
-                    pos
-                    for keyy, path in steiner_dct_update.items()
-                    if keyy != (a, terminal)
-                    for pos in path[1]
-                ]
+                g_temp_temp.remove_nodes_from(
+                    [x for x in self.logical_pos_temp]
+                )
             else:
                 raise RuntimeError(
                     "Something is wrong with the allocation of keys in the steiner_dict"
                 )
+            other_paths = [
+                pos
+                for keyy, path_pair in teleport_dct_update.items()
+                if keyy != key_tree
+                for pos in flattened_paths(path_pair)
+            ]
 
             # a terminal can be placed on the path. in this case you are NOT allowed to remove it! the above somehow sometimes add terminal, hence remove it again
             if terminal in other_paths:
                 other_paths.remove(terminal)
-            if path2[0] in other_paths:
+            if path2 is not None and path2[0] in other_paths:
                 other_paths.remove(path2[0])
 
-            g_temp_temp = g_temp.copy()
+            
             g_temp_temp.remove_nodes_from(other_paths)
 
             # remove nodes from vdp dict (the tree is not allowed to be on or cross another path)
@@ -897,8 +1023,11 @@ class TeleportationRouter(BasicRouter):
                 elif isinstance(path_label[0], int):  # t
                     nodes_to_delete = path[1:]
                 for node in nodes_to_delete:
+                    current_tree_nodes = set(path1 or [])
+                    if path2 is not None:
+                        current_tree_nodes.update(path2)
                     if (
-                        node in g_temp_temp.nodes() and node not in path1 + path2
+                        node in g_temp_temp.nodes() and node not in current_tree_nodes
                     ):  # {terminal, path2[0]}
                         g_temp_temp.remove_node(node)
             # find "neighborhood" of the terminal
@@ -909,80 +1038,82 @@ class TeleportationRouter(BasicRouter):
             )
             # the single source shortest path,... ensures that only reachable nodes are included
             # choose one of them
-            if len(neighborhood) == 1:  # if only one neighbor, i.e. the terminal itself
-                # new_terminal = None #to skip the updating of the root node below.
-                break
-            while True:
-                new_terminal = random.choice(list(neighborhood))
-                if new_terminal == terminal:  # do not want same terminal again
-                    continue
-                try:
-                    path_terminal = nx.dijkstra_path(
-                        g_temp_temp, path2[0], new_terminal
-                    )  # path2[0] is the connecting node on the path
-                except nx.NetworkXNoPath:
-                    warnings.warning(
-                        "If this is called you need to check why this is happening."
-                    )
-                if path_terminal:
-                    break
+            candidates = list(neighborhood - {terminal})
+            random.shuffle(candidates)
 
-            #!TODO should i skip this since we do it globally afterwards again?
-            # (A) loop to possibly find shorter path_terminal
-            paths_lst_temp = []  # collect all paths from path1[1:-1] to new_terminal
-            for node_on_path in path1[1:-1]:
+            path_terminal = None
+
+            for new_terminal in candidates:
                 try:
-                    path_temp = nx.dijkstra_path(
-                        g_temp_temp, node_on_path, new_terminal
-                    )
-                    paths_lst_temp.append(path_temp)
+                    if is_idle:
+                        path_terminal = nx.dijkstra_path(g_temp_temp, q, new_terminal)
+                    elif len(key_tree) == 3 and path2 is not None:
+                        path_terminal = nx.dijkstra_path(g_temp_temp, path2[0], new_terminal)
+                    else: # T gate 
+                        continue
+                    break
                 except nx.NetworkXNoPath:
-                    pass
-            if paths_lst_temp:
-                path_terminal = min(paths_lst_temp, key=len)
+                    continue
+
+            if path_terminal is None:
+                continue
 
             # delete old entry and add new with updated key
-            steiner_dct_update.pop(key_tree, None)
-            if len(key_tree) == 3:
+            teleport_dct_update.pop(key_tree, None)
+            if key_tree[0] == "idle":
+                _, q, terminal = key_tree
+                new_key_tree = ("idle", q, new_terminal)
+                teleport_dct_update[new_key_tree] = (path_terminal, None)
+            elif len(key_tree) == 3:
                 (a, b, terminal) = key_tree
                 new_key_tree = (a, b, new_terminal)
+                teleport_dct_update[new_key_tree] = (path1, path_terminal)
             elif len(key_tree) == 2:
                 (a, terminal) = key_tree
                 new_key_tree = (a, new_terminal)
-            steiner_dct_update[new_key_tree] = (path1, path_terminal)
+                teleport_dct_update[new_key_tree] = (path_terminal, None) #! TODO check for T gate
+            
+            
             # remove_branch_nodes += path_terminal
 
         # it is possible that (A) does not capture everything, as the terminal path may change in a later iteration and thus make even shorter paths possible.
         if (
             new_terminal is not None
         ):  # if the neighborhood has 1 item only, the above breaks. then we do not want to do this reduction.
-            steiner_dct_update_second = steiner_dct_update.copy()
-            for key_tree, (path1, path2) in steiner_dct_update.items():
-                if len(key_tree) == 3:
+            teleport_dct_update_sec = teleport_dct_update.copy()
+            for key_tree, (path1, path2) in teleport_dct_update.items():
+                g_temp_temp = g_temp.copy()
+
+                if key_tree[0] == "idle":
+                    _, q, terminal = key_tree
+                    g_temp_temp.remove_nodes_from(
+                    [x for x in self.logical_pos_temp if x != q]
+                    )
+                elif len(key_tree) == 3:
                     (a, b, terminal) = key_tree
+                    g_temp_temp.remove_nodes_from(
+                    [x for x in self.logical_pos_temp]
+                    )
                 elif len(key_tree) == 2:
                     (a, terminal) = key_tree
+                    g_temp_temp.remove_nodes_from(
+                    [x for x in self.logical_pos_temp]
+                    )
                 else:
                     raise ValueError("steiner dct keys are wrong.")
                 other_paths = [
                     pos
-                    for keyy, path in steiner_dct_update_second.items()
+                    for keyy, path_pair in teleport_dct_update_sec.items()
                     if keyy != key_tree
-                    for pos in path[0][1:-1]
+                    for pos in flattened_paths(path_pair)
                 ]
-                other_paths += [
-                    pos
-                    for keyy, path in steiner_dct_update_second.items()
-                    if keyy != key_tree
-                    for pos in path[1]
-                ]
+
                 if terminal in other_paths:
                     other_paths.remove(terminal)
-                if path2[0] in other_paths:
+                if path2 is not None and path2[0] in other_paths:
                     other_paths.remove(path2[0])
-                if terminal in other_paths:
-                    other_paths.remove(terminal)
-                g_temp_temp = g_temp.copy()
+                
+                
                 g_temp_temp.remove_nodes_from(other_paths)
                 for path_label, path in vdp_dict.items():
                     if isinstance(path_label, str):
@@ -992,35 +1123,56 @@ class TeleportationRouter(BasicRouter):
                     else:
                         nodes_to_delete = path[1:-1]
                     for node in nodes_to_delete:
+                        current_tree_nodes = set(path1 or [])
+                        if path2 is not None:
+                            current_tree_nodes.update(path2)
                         if (
-                            node in g_temp_temp.nodes() and node not in path1 + path2
+                            node in g_temp_temp.nodes() and node not in current_tree_nodes
                         ):  # {terminal, path2[0]}:
                             g_temp_temp.remove_node(node)
                 paths_lst_temp = (
                     []
                 )  # collect all paths from path1[1:-1] to new_terminal
-                for node_on_path in path1[1:-1]:
+                if key_tree[0] == "idle":               
                     try:
                         path_temp = nx.dijkstra_path(
-                            g_temp_temp, node_on_path, terminal
+                            g_temp_temp, q, terminal
                         )
                         paths_lst_temp.append(path_temp)
                     except nx.NetworkXNoPath:
                         pass
+                elif len(key_tree) == 3:
+                    for node_on_path in path1[1:-1]:
+                        try:
+                            path_temp = nx.dijkstra_path(
+                                g_temp_temp, node_on_path, terminal
+                            )
+                            paths_lst_temp.append(path_temp)
+                        except nx.NetworkXNoPath:
+                            pass
+                else: #! T gate 
+                    pass 
                 if paths_lst_temp:
                     path_terminal = min(paths_lst_temp, key=len)
-                    if len(key_tree) == 3:
+                    if key_tree[0] == "idle":
+                        _, q, terminal = key_tree
+                        new_key_tree = ("idle", q, terminal)
+                    elif len(key_tree) == 3:
                         (a, b, terminal) = key_tree
                         new_key_tree = (a, b, terminal)
                     elif len(key_tree) == 2:
                         (a, terminal) = key_tree
                         new_key_tree = (a, terminal)
-                    steiner_dct_update_second.pop(key_tree, None)
-                    steiner_dct_update_second[new_key_tree] = (path1, path_terminal)
+                    teleport_dct_update_sec.pop(key_tree, None)
+                    if len(key_tree) == 3 and key_tree[0] != "idle":
+                        teleport_dct_update_sec[new_key_tree] = (path1, path_terminal)
+                    else:
+                        teleport_dct_update_sec[new_key_tree] = (path_terminal, None)
         if new_terminal is None:
-            steiner_dct_update_second = steiner_dct_update
+            teleport_dct_update_sec = teleport_dct_update
             g_temp_temp = g_temp.copy()
-        return steiner_dct_update_second, g_temp_temp
+        return teleport_dct_update_sec, g_temp_temp
+
 
     @staticmethod
     def replace_pos(lst: list[tuple[pos, pos] | pos], old: pos, new: pos):
@@ -1036,62 +1188,26 @@ class TeleportationRouter(BasicRouter):
             else:
                 result.append(tuple(new if sub == old else sub for sub in item))
         return result
-
-    def run_annealing(
-        self,
-        next_layers,
-        init_steiner_dct: dict,
-        max_iters: int,
-        T_start: float,
-        T_end: float,
-        alpha: int,
-        k_lookahead: int,
-        radius: int,
-        vdp_dict,
-        layout,
-    ):  # , danger_qubits: dict, available_gaps: list):
+    def update_layers(self, layers, old_pos, new_pos):
         """
-        Plug together all previous methods to run annealing for k future layers.
-
-        Args:
-            next_layers:
-            init_steiner_dct:
-            max_iters:
-            T_start:
-            T_end:
-            alpha:
-            k_lookahead:
-            radius:
-            vdp_dict:
-            layout:
-
-        Returns:
-            best_steiner
-            best_cost
-            best_schedule
-            cost_history
-            best_move_type_lst
-            steiner_history
-            graph_history
-
+        update old_pos to new_pos in layers 
         """
-        #!TODO INCLUDE IDLE MOVING GAPS AS PART OF THE ANNEALING TO AVOID SEQUENTIALIZATION
-        factory_times_copy = self.factory_times.copy()
-        if T_start < T_end:
-            raise ValueError("T_start must be larger than T_end")
-        if alpha >= 1.0 or alpha <= 0:
-            raise ValueError("alpha must be between 0 and 1")
+        result = []
+        for layer in layers:  
+            result.append( self.replace_pos(layer, old_pos, new_pos) )
+        return result
 
-        steiner_dct = init_steiner_dct.copy()
-        if self.metric == "crossing":
-            cost = self.count_crossings(
-                next_layers[:k_lookahead], self.logical_pos_temp
-            )  # overwrite this in the upcoming loop
-        elif self.metric == "exact":
+    def calculate_cost(self, metric, layers, logical_pos, factory_times, layout):
+        cost = 0
+        if metric == "crossing":
+                cost = self.count_crossings(
+                    layers, logical_pos
+                )  # overwrite this in the upcoming loop
+        elif metric == "exact":
             schedule, _ = self.find_total_vdp_layers_dyn(
-                next_layers[:k_lookahead],
-                self.logical_pos_temp,
-                factory_times_copy,
+                layers,
+                logical_pos,
+                factory_times,
                 layout,
             )  # initially the self.logical pos can be used. later you need a logical_pos outside of self
             if schedule is not None:
@@ -1102,7 +1218,108 @@ class TeleportationRouter(BasicRouter):
             raise NotImplementedError(
                 "Other metrics than crossing and exact not implemented yet."
             )
-        best_steiner = steiner_dct
+        return cost, schedule
+    
+    
+    
+    def run_annealing(
+        self,
+        next_layers,
+        init_steiner_dct: dict,
+        init_idle_dct: dict,
+        max_iters: int,
+        T_start: float,
+        T_end: float,
+        alpha: int,
+        k_lookahead: int,
+        radius: int,
+        vdp_dict,
+        layout,
+        include_steiner_teleport: bool = True,
+        include_idle_teleport: bool = False, 
+    ):  # , danger_qubits: dict, available_gaps: list):
+        """
+        Plug together all previous methods to run annealing for k future layers.
+
+        Args:
+            next_layers:
+            init_steiner_dct:
+            init_idle_dct:
+            max_iters:
+            T_start:
+            T_end:
+            alpha:
+            k_lookahead:
+            radius:
+            vdp_dict:
+            layout:
+            include_steiner_teleport: 
+            include_idle_teleport:
+
+        Returns:
+            best_steiner
+            best_idle
+            best_cost
+            best_schedule
+            cost_history
+            best_move_type_lst
+            teleport_history
+            graph_history
+
+        """
+        def split_teleport_dct(teleport_dct: dict):
+            """
+            Split a mixed teleport dictionary into:
+                - steiner_dct: CNOT/Steiner entries
+                - idle_move_dct: idle teleport entries
+
+            Expected key types:
+                ("idle", q, terminal) -> (path, None)
+                (a, b, terminal)     -> (path1, path2)
+            """
+            if teleport_dct is None:
+                return None, None
+            
+            steiner_dct = {}
+            idle_move_dct = {}
+
+            for key, value in teleport_dct.items():
+                is_idle = (
+                    isinstance(key, tuple)
+                    and len(key) == 3
+                    and key[0] == "idle"
+                )
+
+                if is_idle:
+                    idle_move_dct[key] = value
+                else:
+                    steiner_dct[key] = value
+
+            return steiner_dct, idle_move_dct
+    
+        if include_steiner_teleport:
+            steiner_dct = copy.deepcopy(init_steiner_dct)
+        else:
+            steiner_dct = {}
+
+        if include_idle_teleport:
+            idle_move_dct = copy.deepcopy(init_idle_dct)
+        else:
+            idle_move_dct = {}
+
+        teleport_dct = {**steiner_dct, **idle_move_dct}
+        #!TODO INCLUDE IDLE MOVING GAPS AS PART OF THE ANNEALING TO AVOID SEQUENTIALIZATION
+        
+        if T_start < T_end:
+            raise ValueError("T_start must be larger than T_end")
+        if alpha >= 1.0 or alpha <= 0:
+            raise ValueError("alpha must be between 0 and 1")
+
+        self.logical_pos_temp = self.logical_pos.copy()
+        factory_times_copy = self.factory_times.copy()
+        cost, schedule = self.calculate_cost(self.metric, next_layers[:k_lookahead], self.logical_pos_temp, factory_times_copy, layout)
+        
+        best_teleport = teleport_dct
         best_cost = cost
         best_move_type_lst = {}
         best_layout = layout.copy()
@@ -1112,15 +1329,16 @@ class TeleportationRouter(BasicRouter):
             best_schedule = None
         #! adapt the logical positions etc
         cost_history = [cost]  # add initial cost to cost history
-        steiner_history = []
+        teleport_history = []
         graph_history = []
 
-        self.logical_pos_temp = self.logical_pos.copy()
+        
 
         T = T_start
         for step in range(max_iters):
-            candidate, g_temp_temp = self.perturbation(steiner_dct, radius, vdp_dict)
+            candidate, g_temp_temp = self.perturbation(teleport_dct, radius, vdp_dict)
             graph_history.append(g_temp_temp)
+
             #!NOT NEEDED ANYMORE
             if candidate is None:  # i.e. if no other element could be found
                 warnings.warn(
@@ -1129,7 +1347,7 @@ class TeleportationRouter(BasicRouter):
                 break  # early break
 
             # after the perturbation you have to update the logical pos, otherwise you will run into issues
-            next_layers_copy = next_layers.copy()
+            next_layers_copy = copy.deepcopy(next_layers)
             move_type_lst_temp = {}
             # compute the cost of the candidate
             # 1. change the position of the target/control to the ancilla spot for all paths (adapt next_layer)
@@ -1137,43 +1355,48 @@ class TeleportationRouter(BasicRouter):
             layout_rev = {j: i for i, j in layout.items()}
             layout_mod = layout.copy()
             for key_candidate, (path1, path2) in candidate.items():
-                if len(key_candidate) == 3:
+
+                is_idle = (isinstance(key_candidate, tuple) and len(key_candidate) == 3 and key_candidate[0] == "idle")
+                # ----------------------------------------------------
+                # Idle teleport:
+                # key = ("idle", q, terminal)
+                # path = p1 = q -> terminal
+                # ----------------------------------------------------
+                if is_idle:
+                    move_type = "idle"
+                    _, q, terminal = key_candidate
+                    next_layers_copy = self.update_layers(next_layers_copy, q, terminal)
+                    logical_pos_temp = self.replace_pos(logical_pos_temp, q, terminal)
+                    label = layout_rev[q]
+                    layout_mod[label] = terminal
+                    move_type_lst_temp.update({("idle", q, terminal): move_type})
+
+                elif len(key_candidate) == 3:
                     (a, b, terminal) = key_candidate
                     # randomly choose whether we shift control to ancilla or target to ancilla
                     move_type = random.choice(["target", "control"])
                     move_type_lst_temp.update({(a, b, terminal): move_type})
+                    old_pos = None
+                    new_pos = None
                     if move_type == "target":
-                        for j, next_layer in enumerate(
-                            next_layers_copy
-                        ):  # update all future layers
-                            next_layers_copy[j] = self.replace_pos(
-                                next_layer, b, terminal
-                            )
-                        # update temporary logical pos such that correct nodes are removed from g_temp in perturbation method
-                        logical_pos_temp = self.replace_pos(
-                            logical_pos_temp, b, terminal
-                        )
-                        label = layout_rev[b]
-                        layout_mod[label] = terminal
+                        old_pos = b
+                        new_pos = terminal
                     else:
-                        for j, next_layer in enumerate(next_layers_copy):
-                            next_layers_copy[j] = self.replace_pos(
-                                next_layer, a, terminal
-                            )
-                        # update temporary logical pos such that correct nodes are removed from g_temp in perturbation method
-                        logical_pos_temp = self.replace_pos(
-                            logical_pos_temp, a, terminal
-                        )
-                        label = layout_rev[a]
-                        layout_mod[label] = terminal
+                        old_pos = a
+                        new_pos = terminal
+
+                    next_layers_copy = self.update_layers(next_layers_copy, old_pos, new_pos)
+                    logical_pos_temp = self.replace_pos(logical_pos_temp, old_pos, new_pos)
+
+                    label = layout_rev[old_pos]
+                    layout_mod[label] = new_pos
                 elif len(key_candidate) == 2:
                     (a, terminal) = key_candidate
                     # move type is fix, one can only move the "a"
                     move_type = "singlequbit"
                     move_type_lst_temp.update({(a, terminal): move_type})
                     # update layers
-                    for j, next_layer in enumerate(next_layers_copy):
-                        next_layers_copy[j] = self.replace_pos(next_layer, a, terminal)
+                    next_layers_copy = self.update_layers(next_layers_copy, a, terminal)
                     logical_pos_temp = self.replace_pos(logical_pos_temp, a, terminal)
                     label = layout_rev[a]
                     layout_mod[label] = terminal
@@ -1182,54 +1405,45 @@ class TeleportationRouter(BasicRouter):
             # 2. compute the crossing metric for next_layer
             # try:
             layers_for_metric = next_layers_copy[:k_lookahead]
-            if self.metric == "crossing":
-                candidate_cost = self.count_crossings(
-                    layers_for_metric, logical_pos_temp
-                )
-            elif self.metric == "exact":
-                schedule, _ = self.find_total_vdp_layers_dyn(
-                    layers_for_metric, logical_pos_temp, factory_times_copy, layout_mod
-                )
-                if schedule is not None:
-                    candidate_cost = len(schedule)
-                else:
-                    candidate_cost = lock_penalty
-            else:
-                raise NotImplementedError(
-                    "Other metrics than crossing and exact not implemented yet."
-                )
+            candidate_cost, schedule = self.calculate_cost(self.metric, layers_for_metric, logical_pos_temp, factory_times_copy, layout_mod)
+            #print("move type list temp", move_type_lst_temp)
 
             # except ValueError:
             #    continue #skip if some config locks the qubits such that you cannot even evaluate count crossings
             delta = candidate_cost - cost
             if delta < 0 or random.random() < np.exp(-delta / T):
-                steiner_dct, cost = candidate, candidate_cost
+                teleport_dct, cost = candidate, candidate_cost
                 if cost < best_cost:  # update the best cost
-                    best_steiner, best_cost = steiner_dct.copy(), cost
+                    best_teleport, best_cost = teleport_dct.copy(), cost
                     best_move_type_lst = move_type_lst_temp.copy()
                     best_schedule = schedule.copy()
                     best_layout = layout_mod.copy()
                 cost_history.append((cost, layers_for_metric))
-            steiner_history.append(candidate)
+            teleport_history.append(candidate)
             # cool
             T = max(T_end, T * alpha)
+            
+            
 
-        # if there is no improvement possible at all, make sure you return a none best steiner
+        # if there is no improvement possible at all, make sure you return a none best teleport
         if len(best_move_type_lst) == 0:
-            best_steiner = None
+            best_teleport = None
             logger.info("No Steiner improvement possible in this layer.")
         else:
             logger.info("Steiner found for this layer.")
 
         logger.info("Final Temperature T = %.6e", T)
 
+        best_steiner, best_idle = split_teleport_dct(best_teleport)
+
         return (
             best_steiner,
+            best_idle, 
             best_cost,
             best_schedule,
             cost_history,
             best_move_type_lst,
-            steiner_history,
+            teleport_history,
             graph_history,
         )
 
@@ -1529,6 +1743,8 @@ class TeleportationRouter(BasicRouter):
         idle_move_type: str,
         reduce_init_steiner: bool = False,
         stimtest: bool = False,
+        include_steiner_teleport: bool = True,
+        include_idle_teleport: bool= False,
     ):
         """
         Optimize the positions in batches of size k_lookahead.
@@ -1576,10 +1792,11 @@ class TeleportationRouter(BasicRouter):
         it = -1
         while len(layers) != 0:
 
-            flag_skip_steiner = False
+            flag_skip_teleport = False
             it += 1
             schedule_temp = {
                 "steiner": None,
+                "idle_teleport": None,
                 "vdp_dict": None,
                 "move_type": None,
                 "logical_pos": None,
@@ -1673,11 +1890,19 @@ class TeleportationRouter(BasicRouter):
                 steiner_dct = self.initialize_steiner(
                     vdp_dict, steiner_init_type, layers=layers, k_lookahead=k_lookahead
                 )
-                if len(steiner_dct) == 0:
+                if include_idle_teleport:
+                    idle_move_dct = self.initialize_idle_moves(
+                        vdp_dict, steiner_dct, layout, max_idle_teleport
+                    )
+                else:
+                    idle_move_dct = {}
+                if len(steiner_dct) == 0 and len(idle_move_dct) == 0:
                     best_steiner_init = None
+                    best_idle_init = None
                 else:
                     (
                         best_steiner_init,
+                        best_idle_init,
                         best_cost,
                         best_schedule,
                         cost_history,
@@ -1687,6 +1912,7 @@ class TeleportationRouter(BasicRouter):
                     ) = self.run_annealing(
                         layers,
                         steiner_dct,
+                        idle_move_dct,
                         max_iters,
                         T_start,
                         T_end,
@@ -1695,6 +1921,8 @@ class TeleportationRouter(BasicRouter):
                         radius=radius,
                         vdp_dict=schedule_temp["vdp_dict"],
                         layout=layout,
+                        include_steiner_teleport=include_steiner_teleport,
+                        include_idle_teleport=include_idle_teleport, 
                     )
                     # store improvement history
                     improvement_history.append((best_cost, cost_history[0]))
@@ -1702,8 +1930,15 @@ class TeleportationRouter(BasicRouter):
                 steiner_dct = self.initialize_steiner(
                     vdp_dict, steiner_init_type, layers=None, k_lookahead=None
                 )
+                if include_idle_teleport:
+                    idle_move_dct = self.initialize_idle_moves(
+                        vdp_dict, steiner_dct, layout, max_idle_teleport
+                    )
+                else:
+                    idle_move_dct = {}
                 (
                     best_steiner_init,
+                    best_idle_init, 
                     best_cost,
                     best_schedule,
                     cost_history,
@@ -1713,6 +1948,7 @@ class TeleportationRouter(BasicRouter):
                 ) = self.run_annealing(
                     layers,
                     steiner_dct,
+                    idle_move_dct, 
                     max_iters,
                     T_start,
                     T_end,
@@ -1721,21 +1957,26 @@ class TeleportationRouter(BasicRouter):
                     radius=radius,
                     vdp_dict=schedule_temp["vdp_dict"],
                     layout=layout,
+                    include_steiner_teleport=include_steiner_teleport,
+                    include_idle_teleport=include_idle_teleport, 
                 )
                 # store improvement history
                 improvement_history.append((best_cost, cost_history[0]))
 
+            print("best_steiner_init: ", best_steiner_init)
+            print("best_idle_init: ", best_idle_init)
+
             # do not use a steiner if the SA could not find a good best_steiner. then it is set to none
-            if best_steiner_init is None:  # break earlier, similar to above
+            if not best_steiner_init and not best_idle_init:  # break earlier, similar to above
                 schedule_temp["vdp_dict"] = vdp_dict
                 schedule_temp["logical_pos"] = self.logical_pos.copy()
                 schedule_temp["layout"] = layout.copy()
                 schedule.append(schedule_temp)
                 with open(filename, "wb") as f:
                     pickle.dump(schedule, f)
-                flag_skip_steiner = True
+                flag_skip_teleport = True
 
-            if flag_skip_steiner is False:
+            if flag_skip_teleport is False:
                 if reduce_steiner:
                     best_steiner, move_type_lst, best_schedule_temp = (
                         self.reduce_steiner_moves(
@@ -1753,6 +1994,7 @@ class TeleportationRouter(BasicRouter):
 
                 else:
                     best_steiner = best_steiner_init  # only rename
+                    
 
                 # update the logical pos etc for the next iteration
                 logical_pos_temp = self.logical_pos_temp.copy()
@@ -1818,12 +2060,34 @@ class TeleportationRouter(BasicRouter):
                         raise RuntimeError(
                             f"other move type than expected: {move_type}"
                         )
+                
+                for key, path in best_idle_init.items():
+                    _, q, terminal = key
+                    if terminal in available_gaps: 
+                        available_gaps.remove(terminal)
+                    else:  
+                        if not jump_harvesting:  
+                            danger_qubits_temp.update({terminal: k_lookahead})
+                        else:
+                            danger_qubits_temp.update({terminal: k_lookahead - 1})
+                    for j, next_layer in enumerate(next_layers_copy):
+                            next_layers_copy[j] = self.replace_pos(
+                                next_layer, q, terminal
+                            )
+                    logical_pos_temp = self.replace_pos(
+                            logical_pos_temp, q, terminal
+                        )
+                    label = layout_rev[q]
+                    layout_mod[label] = terminal
+                    available_gaps_temp.append(q)
+
                 self.logical_pos = logical_pos_temp.copy()
                 self.logical_pos_temp = logical_pos_temp.copy()
                 layers = next_layers_copy.copy()
                 layout = layout_mod.copy()
                 # add everything to solution
                 schedule_temp["steiner"] = best_steiner
+                schedule_temp["idle_teleport"] = best_idle_init
                 schedule_temp["vdp_dict"] = vdp_dict
                 schedule_temp["move_type"] = move_type_lst
                 schedule_temp["logical_pos"] = self.logical_pos.copy()
@@ -1852,7 +2116,7 @@ class TeleportationRouter(BasicRouter):
                             None,
                         )
                     )
-                elif jump_harvesting and flag_skip_steiner:
+                elif jump_harvesting and flag_skip_teleport:
                     reduce_time_stamp = True
                     schedule, danger_qubits, available_gaps, layout, layers = (
                         self.idle_move_back(
@@ -1868,7 +2132,7 @@ class TeleportationRouter(BasicRouter):
                             None,
                         )
                     )  # because otherwise error
-                elif jump_harvesting and not flag_skip_steiner:
+                elif jump_harvesting and not flag_skip_teleport:
                     reduce_time_stamp = False
                     schedule, danger_qubits, available_gaps, layout, layers = (
                         self.idle_move_back(

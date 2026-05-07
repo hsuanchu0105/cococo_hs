@@ -36,8 +36,8 @@ print("layout: ", layout)
 q = len(data_qubit_locs)
 print("number of data qubits: ", q)
 j = 8
-#num_gates = q*2
-num_gates = 10
+num_gates = q*2
+#num_gates = 10
 
 
 # j gates per layer on q qubits 
@@ -90,7 +90,9 @@ schedule, _ = router.optimize_layers(
         reduce_steiner = reduce_steiner,
         idle_move_type = idle_move_type,
         reduce_init_steiner = False,
-        stimtest = True)
+        stimtest = True, 
+        include_steiner_teleport = True,
+        include_idle_teleport = False, )
 
 print("Len of schedule with teleport router: ", len(schedule))
 print("Reduction Delta: ", len(vdp_layers) - len(schedule))
@@ -105,7 +107,7 @@ anim = make_clean_routing_html_animation(
     factories=factories,
     figsize=(18, 8),
     interval=900,
-    save_path="clean_routing_animation.html",
+    save_path="routing_animation_idle.html",
 )
 
 HTML(anim.to_jshtml())
