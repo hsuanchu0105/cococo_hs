@@ -1069,3 +1069,126 @@ def initialize_idle_moves(
 
     return idle_move_dct
 
+def reduce_teleport_moves(
+        self, steiner_dct, idle_dct, move_type_lst, next_layers, best_cost, k_lookahead, layout
+    ):
+        """
+        Given the current dictionaries, make sure that you effectively use as least movements as possible.
+
+        This means, we go through small subsets of the tree solution and check at what point we reach the same optimized cost.
+        This can scale horribly if you have too many dicts in your solution.
+        """
+        factory_times_copy = self.factory_times.copy()
+        flag = False
+        best_dct_temp = None
+        best_schedule = None
+
+        teleport_dct = {**steiner_dct, **idle_dct}
+
+        for r in range(1, len(teleport_dct) + 1):
+            for subset in itertools.combinations(teleport_dct.items(), r):
+                # translate everything into the setup of the steiner_dct movement
+                logical_pos_temp = self.logical_pos_temp.copy()
+                # dct_temp = {(a,b,terminal): (path1, path2) for (a,b,terminal), (path1, path2) in subset}
+                dct_temp = {
+                    key: (path1, path2) for key, (path1, path2) in subset
+                }  # allows different types of keys
+                next_layers_copy = next_layers.copy()
+                layout_mod = layout.copy()
+                layout_rev = {j: i for i, j in layout.items()}
+                for key_subset, (path1, path2) in dct_temp.items():
+                    if key_subset[0] == "idle":
+                        _, q, terminal = key_subset
+                    elif len(key_subset) == 3:
+                        (a, b, terminal) = key_subset
+                    elif len(key_subset) == 2:
+                        (a, terminal) = key_subset
+                    else:
+                        raise RuntimeError("something wrong with subset steiner keys")
+
+                    # randomly choose whether we shift control to ancilla or target to ancilla
+                    move_type = move_type_lst[key_subset]
+                    if move_type == "idle":
+                        for j, next_layer in enumerate(next_layers_copy):
+                            next_layers_copy[j] = self.replace_pos(
+                                next_layer, q, terminal
+                            )
+                        # update temporary logical pos such that correct nodes are removed from g_temp in perturbation method
+                        logical_pos_temp = self.replace_pos(
+                            logical_pos_temp, q, terminal
+                        )
+                        label = layout_rev[q]
+                        layout_mod[label] = terminal
+                    elif move_type == "target":
+                        for j, next_layer in enumerate(next_layers_copy):
+                            next_layers_copy[j] = self.replace_pos(
+                                next_layer, b, terminal
+                            )
+                        # update temporary logical pos such that correct nodes are removed from g_temp in perturbation method
+                        logical_pos_temp = self.replace_pos(
+                            logical_pos_temp, b, terminal
+                        )
+                        label = layout_rev[b]
+                        layout_mod[label] = terminal
+                    elif (
+                        move_type == "control" or move_type == "singlequbit"
+                    ):  # we denote the control a and the singlequibt a, so this can be summarized
+                        for j, next_layer in enumerate(next_layers_copy):
+                            next_layers_copy[j] = self.replace_pos(
+                                next_layer, a, terminal
+                            )
+                        # update temporary logical pos such that correct nodes are removed from g_temp in perturbation method
+                        logical_pos_temp = self.replace_pos(
+                            logical_pos_temp, a, terminal
+                        )
+                        label = layout_rev[a]
+                        layout_mod[label] = terminal
+                    else:
+                        raise RuntimeError(
+                            f"other move type than expected: {move_type}"
+                        )
+                # 2. compute the crossing metric for next_layer
+                try:
+                    if self.metric == "crossing":
+                        candidate_cost = self.count_crossings(
+                            next_layers_copy[:k_lookahead], logical_pos_temp
+                        )
+                    elif self.metric == "exact":
+                        schedule, _ = self.find_total_vdp_layers_dyn(
+                            next_layers_copy[:k_lookahead],
+                            logical_pos_temp,
+                            factory_times_copy,
+                            layout_mod,
+                        )
+                        if schedule is not None:
+                            candidate_cost = len(schedule)
+                        else:
+                            candidate_cost = lock_penalty
+                    else:
+                        raise NotImplementedError(
+                            "Other metrics than crossing and exact not implemented yet."
+                        )
+                except ValueError:
+                    continue
+
+                if candidate_cost == best_cost:
+                    flag = True
+                    best_dct_temp = dct_temp
+                    best_schedule = schedule.copy() if self.metric == "exact" else None
+                    break
+            if flag:
+                break
+
+        if flag:
+            steiner_reduced, idle_reduced = split_teleport_dct(best_dct_temp) # {(a,b,terminal): (path1, path2) for (a,b,terminal), (path1, path2) in subset}
+            # move_type_lst_red = {(a,b,terminal): move_type_lst[(a,b,terminal)] for (a,b,terminal), (_, _) in best_dct_temp.items()}
+            move_type_lst_red = {
+                key: move_type_lst[key] for key, (_, _) in best_dct_temp.items()
+            }
+            final_schedule = best_schedule.copy()
+        else:  # return the inputs if nothing is found
+            steiner_reduced = steiner_dct
+            idle_reduced = idle_dct
+            move_type_lst_red = move_type_lst
+            final_schedule = None
+        return steiner_reduced, idle_reduced, move_type_lst_red, final_schedule

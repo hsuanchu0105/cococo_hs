@@ -1520,21 +1520,24 @@ class TeleportationRouter(BasicRouter):
             graph_history,
         )
 
-    def reduce_steiner_moves(
-        self, steiner_dct, move_type_lst, next_layers, best_cost, k_lookahead, layout
+    def reduce_teleport_moves(
+        self, steiner_dct, idle_dct, move_type_lst, next_layers, best_cost, k_lookahead, layout
     ):
         """
-        Given some tree solution, make sure that you effectively use as least movements as possible.
+        Given the current dictionaries, make sure that you effectively use as least movements as possible.
 
         This means, we go through small subsets of the tree solution and check at what point we reach the same optimized cost.
-        This can scale horribly if you have too many trees in your solution.
+        This can scale horribly if you have too many dicts in your solution.
         """
         factory_times_copy = self.factory_times.copy()
         flag = False
         best_dct_temp = None
         best_schedule = None
-        for r in range(1, len(steiner_dct) + 1):
-            for subset in itertools.combinations(steiner_dct.items(), r):
+
+        teleport_dct = {**steiner_dct, **idle_dct}
+
+        for r in range(1, len(teleport_dct) + 1):
+            for subset in itertools.combinations(teleport_dct.items(), r):
                 # translate everything into the setup of the steiner_dct movement
                 logical_pos_temp = self.logical_pos_temp.copy()
                 # dct_temp = {(a,b,terminal): (path1, path2) for (a,b,terminal), (path1, path2) in subset}
@@ -1545,7 +1548,9 @@ class TeleportationRouter(BasicRouter):
                 layout_mod = layout.copy()
                 layout_rev = {j: i for i, j in layout.items()}
                 for key_subset, (path1, path2) in dct_temp.items():
-                    if len(key_subset) == 3:
+                    if key_subset[0] == "idle":
+                        _, q, terminal = key_subset
+                    elif len(key_subset) == 3:
                         (a, b, terminal) = key_subset
                     elif len(key_subset) == 2:
                         (a, terminal) = key_subset
@@ -1554,7 +1559,18 @@ class TeleportationRouter(BasicRouter):
 
                     # randomly choose whether we shift control to ancilla or target to ancilla
                     move_type = move_type_lst[key_subset]
-                    if move_type == "target":
+                    if move_type == "idle":
+                        for j, next_layer in enumerate(next_layers_copy):
+                            next_layers_copy[j] = self.replace_pos(
+                                next_layer, q, terminal
+                            )
+                        # update temporary logical pos such that correct nodes are removed from g_temp in perturbation method
+                        logical_pos_temp = self.replace_pos(
+                            logical_pos_temp, q, terminal
+                        )
+                        label = layout_rev[q]
+                        layout_mod[label] = terminal
+                    elif move_type == "target":
                         for j, next_layer in enumerate(next_layers_copy):
                             next_layers_copy[j] = self.replace_pos(
                                 next_layer, b, terminal
@@ -1615,7 +1631,7 @@ class TeleportationRouter(BasicRouter):
                 break
 
         if flag:
-            steiner_reduced = best_dct_temp  # {(a,b,terminal): (path1, path2) for (a,b,terminal), (path1, path2) in subset}
+            steiner_reduced, idle_reduced = split_teleport_dct(best_dct_temp) # {(a,b,terminal): (path1, path2) for (a,b,terminal), (path1, path2) in subset}
             # move_type_lst_red = {(a,b,terminal): move_type_lst[(a,b,terminal)] for (a,b,terminal), (_, _) in best_dct_temp.items()}
             move_type_lst_red = {
                 key: move_type_lst[key] for key, (_, _) in best_dct_temp.items()
@@ -1623,9 +1639,10 @@ class TeleportationRouter(BasicRouter):
             final_schedule = best_schedule.copy()
         else:  # return the inputs if nothing is found
             steiner_reduced = steiner_dct
+            idle_reduced = idle_dct
             move_type_lst_red = move_type_lst
             final_schedule = None
-        return steiner_reduced, move_type_lst_red, final_schedule
+        return steiner_reduced, idle_reduced, move_type_lst_red, final_schedule
 
     def idle_move_back(
         self,
@@ -1812,7 +1829,7 @@ class TeleportationRouter(BasicRouter):
         k_lookahead,
         steiner_init_type,
         jump_harvesting: str,
-        reduce_steiner: bool,
+        reduce_teleport: bool,
         idle_move_type: str,
         reduce_init_steiner: bool = False,
         stimtest: bool = False,
@@ -2050,10 +2067,11 @@ class TeleportationRouter(BasicRouter):
                 flag_skip_teleport = True
 
             if flag_skip_teleport is False:
-                if reduce_steiner:
-                    best_steiner, move_type_lst, best_schedule_temp = (
-                        self.reduce_steiner_moves(
+                if reduce_teleport:
+                    best_steiner, best_idle, move_type_lst, best_schedule_temp = (
+                        self.reduce_teleport_moves(
                             best_steiner_init,
+                            best_idle_init,
                             move_type_lst,
                             layers,
                             best_cost,
@@ -2061,8 +2079,8 @@ class TeleportationRouter(BasicRouter):
                             layout,
                         )
                     )
-                    if len(best_steiner) < len(best_steiner_init):
-                        logger.info("Complexity of Steiner could be reduced.")
+                    if len(best_steiner) + len(best_idle) < len(best_steiner_init) + len(best_idle_init):
+                        logger.info("Complexity of teleportation could be reduced.")
                     best_schedule = best_schedule_temp.copy()
 
                 else:
@@ -2134,7 +2152,7 @@ class TeleportationRouter(BasicRouter):
                             f"other move type than expected: {move_type}"
                         )
                 
-                for key, path in best_idle_init.items():
+                for key, path in best_idle.items():
                     _, q, terminal = key
                     if terminal in available_gaps: 
                         available_gaps.remove(terminal)
@@ -2160,7 +2178,7 @@ class TeleportationRouter(BasicRouter):
                 layout = layout_mod.copy()
                 # add everything to solution
                 schedule_temp["steiner"] = best_steiner
-                schedule_temp["idle_teleport"] = best_idle_init
+                schedule_temp["idle_teleport"] = best_idle
                 schedule_temp["vdp_dict"] = vdp_dict
                 schedule_temp["move_type"] = move_type_lst
                 schedule_temp["logical_pos"] = self.logical_pos.copy()
