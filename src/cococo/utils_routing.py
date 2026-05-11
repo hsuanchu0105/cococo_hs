@@ -891,6 +891,7 @@ class TeleportationRouter(BasicRouter):
         def occupied_nodes_from_vdp(vdp_dict):
             occupied = set()
             for key, path in vdp_dict.items():
+                #occupied.update(path)
                 if isinstance(key, str): # idle 
                     occupied.update(path[1:])
                 elif isinstance(key[0], tuple): # CNOT
@@ -981,24 +982,33 @@ class TeleportationRouter(BasicRouter):
 
         For each tree in steiner_dct a new location of the 3rd terminal is updated randomly.
         """
-        def flattened_paths(path_pair):
+        def occupied_nodes_for_others(key, path_pair):
             path1, path2 = path_pair
             nodes = []
+
+            if key[0] == "idle":
+                if path1 is not None:
+                    nodes += path1[1:]      # exclude idle source q
+                return nodes
+
+            # CNOT or T teleport
             if path1 is not None:
-                nodes += path1[1:-1]
+                nodes += path1[1:-1]        # exclude logical endpoints
             if path2 is not None:
-                nodes += path2
+                nodes += path2              # branch path is occupied
+
             return nodes
         
         if self.logical_pos_temp is None:
             raise RuntimeError(
                 "Need to initialize logical pos temp properly in a summarizing method."
-            )
-        g_temp = self.g.copy()
-        g_temp.remove_nodes_from(self.factory_pos)
-        g_temp.remove_nodes_from(
-            self.logical_pos_temp
-        )  # logical pos temp must be successively updated in a loop where you apply multiple perturbations
+            )   
+       
+        
+         #g_temp.remove_nodes_from(
+        #    self.logical_pos_temp
+        #)  # logical pos temp must be successively updated in a loop where you apply multiple perturbations
+
 
         teleport_dct_update = teleport_dct.copy()
         # used_nodes = set()
@@ -1006,73 +1016,36 @@ class TeleportationRouter(BasicRouter):
 
         for key_tree, (path1, path2) in teleport_dct.items():
 
-            # determine whether tree corresponds to a CNOT or T gate
+            g_temp = self.g.copy()
+            g_temp.remove_nodes_from(self.factory_pos)
+            # determine whether tree corresponds to an idle, a CNOT or T gate
             if key_tree[0] == "idle":
                 _, q, terminal = key_tree
-                """
-                other_paths = [
-                    pos
-                    for keyy, path in teleport_dct_update.items()
-                    if keyy != ("idle", q, terminal)
-                    for pos in path[0][1:-1]
-                ]
-                other_paths += [
-                    pos
-                    for keyy, path in teleport_dct_update.items()
-                    if keyy != ("idle", q, terminal) and path[1] is not None
-                    for pos in path[1]
-                ] 
-                """
+                g_temp.remove_nodes_from([x for x in self.logical_pos_temp if x != q])
                 other_paths = [
                     pos
                     for keyy, path_pair in teleport_dct_update.items()
                     if keyy != key_tree
-                    for pos in flattened_paths(path_pair)
+                    for pos in occupied_nodes_for_others(keyy,path_pair)
                 ]
-                g_temp.add_node(q)
+                
             elif len(key_tree) == 3:
                 (a, b, terminal) = key_tree
-                """
-                other_paths = [
-                    pos
-                    for keyy, path in teleport_dct_update.items()
-                    if keyy != (a, b, terminal)
-                    for pos in path[0][1:-1]
-                ]
-                other_paths += [
-                    pos
-                    for keyy, path in teleport_dct_update.items()
-                    if keyy != (a, b, terminal)
-                    for pos in path[1] 
-                ]  # not 1:-1 because 3rd terminal is not allowed to be part of other terminal path
-                """
+                g_temp.remove_nodes_from([x for x in self.logical_pos_temp])
                 other_paths = [
                     pos
                     for keyy, path_pair in teleport_dct_update.items()
                     if keyy != key_tree
-                    for pos in flattened_paths(path_pair)
+                    for pos in occupied_nodes_for_others(keyy, path_pair)
                 ]
             elif len(key_tree) == 2:
                 (a, terminal) = key_tree
-                """
-                other_paths = [
-                    pos
-                    for keyy, path in teleport_dct_update.items()
-                    if keyy != (a, terminal) 
-                    for pos in path[0][1:-1]
-                ]
-                other_paths += [
-                    pos
-                    for keyy, path in teleport_dct_update.items()
-                    if keyy != (a, terminal) 
-                    for pos in path[1]
-                ]
-                """
+                g_temp.remove_nodes_from([x for x in self.logical_pos_temp])
                 other_paths = [
                     pos
                     for keyy, path_pair in teleport_dct_update.items()
                     if keyy != key_tree
-                    for pos in flattened_paths(path_pair)
+                    for pos in occupied_nodes_for_others(keyy, path_pair)
                 ]
             else:
                 raise RuntimeError(
@@ -1097,23 +1070,22 @@ class TeleportationRouter(BasicRouter):
                 elif isinstance(path_label[0], int):  # t
                     nodes_to_delete = path[1:]
                 for node in nodes_to_delete:
+                    if path2:
+                        path_con = path1 + path2
+                    else:
+                        path_con = path1
                     if (
-                        node in g_temp_temp.nodes() and node not in flattened_paths([path1, path2]) #!TODO path1 + path2 ? 
+                        node in g_temp_temp.nodes() and node not in path_con
                     ):  # {terminal, path2[0]}
                         g_temp_temp.remove_node(node)
             # find "neighborhood" of the terminal
-            if key_tree[0] == "idle":
-                neighborhood = set(
-                    nx.single_source_shortest_path_length(
-                        g_temp_temp, q, cutoff=radius
-                    ).keys()
-                )
-            else:
-                neighborhood = set(
-                    nx.single_source_shortest_path_length(
-                        g_temp_temp, terminal, cutoff=radius
-                    ).keys()
-                )
+            
+            neighborhood = set(
+                nx.single_source_shortest_path_length(
+                    g_temp_temp, terminal, cutoff=radius
+                ).keys()
+            )
+            
             # the single source shortest path,... ensures that only reachable nodes are included
             # choose one of them
             if len(neighborhood) == 1:  # if only one neighbor, i.e. the terminal itself
@@ -1154,17 +1126,17 @@ class TeleportationRouter(BasicRouter):
 
             #!TODO should i skip this since we do it globally afterwards again?
             # (A) loop to possibly find shorter path_terminal
-            paths_lst_temp = []  # collect all paths from path1[1:-1] to new_terminal
-            for node_on_path in path1[1:-1]:
-                try:
-                    path_temp = nx.dijkstra_path(
-                        g_temp_temp, node_on_path, new_terminal
-                    )
-                    paths_lst_temp.append(path_temp)
-                except nx.NetworkXNoPath:
-                    pass
-            if paths_lst_temp:
-                path_terminal = min(paths_lst_temp, key=len)
+            #paths_lst_temp = []  # collect all paths from path1[1:-1] to new_terminal
+            #for node_on_path in path1[1:-1]:
+            #    try:
+            #        path_temp = nx.dijkstra_path(
+            #            g_temp_temp, node_on_path, new_terminal
+            #        )
+            #        paths_lst_temp.append(path_temp)
+            #    except nx.NetworkXNoPath:
+            #        pass
+            #if paths_lst_temp:
+            #    path_terminal = min(paths_lst_temp, key=len)
 
             # delete old entry and add new iwth updated key
             teleport_dct_update.pop(key_tree, None)
@@ -1188,33 +1160,24 @@ class TeleportationRouter(BasicRouter):
         ):  # if the neighborhood has 1 item only, the above breaks. then we do not want to do this reduction.
             teleport_dct_update_second = teleport_dct_update.copy()
             for key_tree, (path1, path2) in teleport_dct_update.items():
+                g_temp = self.g.copy()
+                g_temp.remove_nodes_from(self.factory_pos)
                 if key_tree[0] =="idle":
                     _, q, terminal = key_tree
+                    g_temp.remove_nodes_from([x for x in self.logical_pos_temp if x != q])
                 elif len(key_tree) == 3:
                     (a, b, terminal) = key_tree
+                    g_temp.remove_nodes_from([x for x in self.logical_pos_temp])
                 elif len(key_tree) == 2:
                     (a, terminal) = key_tree
+                    g_temp.remove_nodes_from([x for x in self.logical_pos_temp])
                 else:
                     raise ValueError("steiner dct keys are wrong.")
-                """
-                other_paths = [
-                    pos
-                    for keyy, path in teleport_dct_update_second.items()
-                    if keyy != key_tree
-                    for pos in path[0][1:-1]
-                ]
-                other_paths += [
-                    pos
-                    for keyy, path in teleport_dct_update_second.items()
-                    if keyy != key_tree 
-                    for pos in path[1] 
-                ]
-                """
                 other_paths = [
                     pos
                     for keyy, path_pair in teleport_dct_update_second.items()
                     if keyy != key_tree
-                    for pos in flattened_paths(path_pair)
+                    for pos in occupied_nodes_for_others(keyy, path_pair)
                 ]
                 if terminal in other_paths:
                     other_paths.remove(terminal)
@@ -1232,15 +1195,19 @@ class TeleportationRouter(BasicRouter):
                     else:
                         nodes_to_delete = path[1:-1]
                     for node in nodes_to_delete:
+                        if path2:
+                            path_con = path1 + path2
+                        else:
+                            path_con = path1
                         if (
-                            node in g_temp_temp.nodes() and node not in flattened_paths([path1, path2]) #! TODO path1+path2?
+                            node in g_temp_temp.nodes() and node not in path_con
                         ):  # {terminal, path2[0]}:
                             g_temp_temp.remove_node(node)
                 paths_lst_temp = (
                     []
                 )  # collect all paths from path1[1:-1] to new_terminal
                 if key_tree[0] == "idle": 
-                    g_temp_temp.add_node(q)              
+                                  
                     try:
                         path_temp = nx.dijkstra_path(
                             g_temp_temp, q, terminal
@@ -1739,6 +1706,16 @@ class TeleportationRouter(BasicRouter):
                         ):  # and node != gap:
                             g_copy.remove_node(node)
 
+                if schedule_temp["idle_teleport"]:
+                    for path, _ in schedule_temp["idle_teleport"].values():
+                        for node in path:
+                            if node == gap:
+                                flag_skip = True
+                            if (
+                                node in g_copy.nodes() and node != danger_qubit
+                            ):  # and node != gap:
+                                g_copy.remove_node(node)
+
                 for pos in layout_mod.values():
                     if (
                         pos in g_copy.nodes() and pos != danger_qubit and pos != gap
@@ -2086,7 +2063,7 @@ class TeleportationRouter(BasicRouter):
 
                 else:
                     best_steiner = best_steiner_init  # only rename
-                    
+                    best_idle = best_idle_init
 
                 # update the logical pos etc for the next iteration
                 logical_pos_temp = self.logical_pos_temp.copy()
@@ -2255,8 +2232,10 @@ class TeleportationRouter(BasicRouter):
             flag_finished = False
             layers_k = layers[:k_lookahead].copy()
             layers_after_k = layers[k_lookahead:].copy()
+
+            has_teleport = bool(best_steiner_init) or bool(best_idle_init)
             if (
-                jump_harvesting and best_steiner_init is not None and k_lookahead > 1
+                jump_harvesting and has_teleport and k_lookahead > 1
             ):  # if no best steiner found, just standard further iterations
                 # route the next k_lookahead-1 layers without steiner optimization to "harvest" the full potential of previous optimization and without disturbing the previous optimization by new steiner moves
                 # make the temp files empty because otherwise repetitive action which is superfluous
