@@ -188,6 +188,36 @@ class BasicRouter:
 
         return layers
     
+    def split_teleport_dct(self, teleport_dct: dict):
+        """
+        Split a mixed teleport dictionary into:
+            - steiner_dct: CNOT/Steiner entries
+            - idle_move_dct: idle teleport entries
+
+        Expected key types:
+            ("idle", q, terminal) -> (path, None)
+            (a, b, terminal)     -> (path1, path2)
+        """
+        if teleport_dct is None:
+            return None, None
+        
+        steiner_dct = {}
+        idle_move_dct = {}
+
+        for key, value in teleport_dct.items():
+            is_idle = (
+                isinstance(key, tuple)
+                and len(key) == 3
+                and key[0] == "idle"
+            )
+
+            if is_idle:
+                idle_move_dct[key] = value
+            else:
+                steiner_dct[key] = value
+
+        return steiner_dct, idle_move_dct
+    
     def find_max_vdp_set(
         self,
         layer: list[tuple[pos, pos] | pos],
@@ -788,7 +818,7 @@ class TeleportationRouter(BasicRouter):
                     continue  # skip this path if no reachable node found
                 # select a random reachable node
                 terminal_node = random.choice(reachable_nodes)
-                # TODO are these three lines redundant?
+                #! TODO are these three lines redundant?
                 # determine the path between the node which is ensured on the path and the terminal
                 path_steiner = nx.dijkstra_path(
                     g_temp_temp, node_on_path, terminal_node
@@ -929,6 +959,7 @@ class TeleportationRouter(BasicRouter):
                 continue
 
             reachable = list(nx.single_source_shortest_path_length(g_temp, q).keys())
+            reachable = [node for node in reachable if node != q] # exclude q 
 
             if not reachable:
                 continue
@@ -953,14 +984,12 @@ class TeleportationRouter(BasicRouter):
         def flattened_paths(path_pair):
             path1, path2 = path_pair
             nodes = []
-
             if path1 is not None:
                 nodes += path1[1:-1]
-
             if path2 is not None:
                 nodes += path2
-
             return nodes
+        
         if self.logical_pos_temp is None:
             raise RuntimeError(
                 "Need to initialize logical pos temp properly in a summarizing method."
@@ -1069,10 +1098,10 @@ class TeleportationRouter(BasicRouter):
                     nodes_to_delete = path[1:]
                 for node in nodes_to_delete:
                     if (
-                        node in g_temp_temp.nodes() and node not in path1 + path2
+                        node in g_temp_temp.nodes() and node not in flattened_paths([path1, path2]) #!TODO path1 + path2 ? 
                     ):  # {terminal, path2[0]}
                         g_temp_temp.remove_node(node)
-            # find "neighborhood" of teh terminal
+            # find "neighborhood" of the terminal
             if key_tree[0] == "idle":
                 neighborhood = set(
                     nx.single_source_shortest_path_length(
@@ -1204,7 +1233,7 @@ class TeleportationRouter(BasicRouter):
                         nodes_to_delete = path[1:-1]
                     for node in nodes_to_delete:
                         if (
-                            node in g_temp_temp.nodes() and node not in path1 + path2
+                            node in g_temp_temp.nodes() and node not in flattened_paths([path1, path2]) #! TODO path1+path2?
                         ):  # {terminal, path2[0]}:
                             g_temp_temp.remove_node(node)
                 paths_lst_temp = (
@@ -1340,35 +1369,7 @@ class TeleportationRouter(BasicRouter):
             graph_history
 
         """
-        def split_teleport_dct(teleport_dct: dict):
-            """
-            Split a mixed teleport dictionary into:
-                - steiner_dct: CNOT/Steiner entries
-                - idle_move_dct: idle teleport entries
-
-            Expected key types:
-                ("idle", q, terminal) -> (path, None)
-                (a, b, terminal)     -> (path1, path2)
-            """
-            if teleport_dct is None:
-                return None, None
-            
-            steiner_dct = {}
-            idle_move_dct = {}
-
-            for key, value in teleport_dct.items():
-                is_idle = (
-                    isinstance(key, tuple)
-                    and len(key) == 3
-                    and key[0] == "idle"
-                )
-
-                if is_idle:
-                    idle_move_dct[key] = value
-                else:
-                    steiner_dct[key] = value
-
-            return steiner_dct, idle_move_dct
+        
     
         if include_steiner_teleport:
             steiner_dct = copy.deepcopy(init_steiner_dct)
@@ -1507,7 +1508,7 @@ class TeleportationRouter(BasicRouter):
 
         logger.info("Final Temperature T = %.6e", T)
 
-        best_steiner, best_idle = split_teleport_dct(best_teleport)
+        best_steiner, best_idle = self.split_teleport_dct(best_teleport)
 
         return (
             best_steiner,
@@ -1631,7 +1632,7 @@ class TeleportationRouter(BasicRouter):
                 break
 
         if flag:
-            steiner_reduced, idle_reduced = split_teleport_dct(best_dct_temp) # {(a,b,terminal): (path1, path2) for (a,b,terminal), (path1, path2) in subset}
+            steiner_reduced, idle_reduced = self.split_teleport_dct(best_dct_temp) # {(a,b,terminal): (path1, path2) for (a,b,terminal), (path1, path2) in subset}
             # move_type_lst_red = {(a,b,terminal): move_type_lst[(a,b,terminal)] for (a,b,terminal), (_, _) in best_dct_temp.items()}
             move_type_lst_red = {
                 key: move_type_lst[key] for key, (_, _) in best_dct_temp.items()

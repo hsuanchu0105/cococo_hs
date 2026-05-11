@@ -23,7 +23,7 @@ g, data_qubit_locs, factory_ring = layouts.gen_layout_scalable(layout_type, m, n
 layout = {i: j for i,j in enumerate(data_qubit_locs)}
 t=2
 
-print("layout: ", layout)
+#print("layout: ", layout)
 
 #print(g)
 #print("data qubit location", data_qubit_locs)
@@ -43,12 +43,12 @@ num_gates = q*2
 # j gates per layer on q qubits 
 # pairs indicate the qubit index (0, ..., q)
 dag, pairs = circuit_construction.create_random_sequential_circuit_dag(j, q, num_gates, ) # at least num_gates gates
-print("pairs: ", pairs)
+#print("pairs: ", pairs)
 print("number of gates: ", len(pairs))
 
 # terminal pairs indicate the 2d coordinates 
 terminal_pairs = layouts.translate_layout_circuit(pairs, layout) #let's stick to the simple layout
-print("terminal pairs: ", terminal_pairs)
+#print("terminal pairs: ", terminal_pairs)
 
 router = utils.BasicRouter(g, data_qubit_locs, factories, valid_path = "cc", t=t, metric = "exact", use_dag = True)
 # each layer has disjoint logical support, however it doesn't guarantee that all those gates can be physically routed at the same time on the lattice
