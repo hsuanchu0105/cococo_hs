@@ -92,22 +92,28 @@ schedule, _ = router.optimize_layers(
         reduce_init_steiner = False,
         stimtest = True, 
         include_steiner_teleport = True,
-        include_idle_teleport = True, )
+        include_idle_teleport = False, )
 
 print("Len of schedule with teleport router: ", len(schedule))
 print("Reduction Delta: ", len(vdp_layers) - len(schedule))
 
 from IPython.display import HTML
 from cococo.animation_routing_html import make_clean_routing_html_animation
+from datetime import datetime
+import matplotlib as mpl 
+
+mpl.rcParams["animation.embed_limit"] = 100  # MB
+Path("animation").mkdir(exist_ok=True)
+filename = f"animation/animation_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.html"
 
 anim = make_clean_routing_html_animation(
     g,
     schedule,
     initial_layout=layout,
     factories=factories,
-    figsize=(18, 8),
+    figsize=(14, 6),
     interval=900,
-    save_path="routing_animation_idle.html",
+    save_path = filename, 
 )
 
 HTML(anim.to_jshtml())
