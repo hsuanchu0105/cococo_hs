@@ -1093,7 +1093,7 @@ class TeleportationRouter(BasicRouter):
             # choose one of them
             if len(neighborhood) == 1:  # if only one neighbor, i.e. the terminal itself
                 # new_terminal = None #to skip the updating of the root node below.
-                break
+                continue
             if key_tree[0] == "idle":
                 path_terminal = None
                 while True:
@@ -1125,19 +1125,21 @@ class TeleportationRouter(BasicRouter):
                     if path_terminal:
                         break
 
-            #!TODO should i skip this since we do it globally afterwards again?
-            # (A) loop to possibly find shorter path_terminal
-            paths_lst_temp = []  # collect all paths from path1[1:-1] to new_terminal
-            for node_on_path in path1[1:-1]:
-                try:
-                    path_temp = nx.dijkstra_path(
-                        g_temp, node_on_path, new_terminal
-                    )
-                    paths_lst_temp.append(path_temp)
-                except nx.NetworkXNoPath:
-                    pass
-            if paths_lst_temp:
-                path_terminal = min(paths_lst_temp, key=len)
+                    #!TODO should i skip this since we do it globally afterwards again?
+                    # (A) loop to possibly find shorter path_terminal
+                    paths_lst_temp = []  # collect all paths from path1[1:-1] to new_terminal
+                    for node_on_path in path1[1:-1]:
+                        try:
+                            path_temp = nx.dijkstra_path(
+                                g_temp, node_on_path, new_terminal
+                            )
+                            paths_lst_temp.append(path_temp)
+                        except nx.NetworkXNoPath:
+                            pass
+                    if paths_lst_temp:
+                        path_terminal_tmp = min(paths_lst_temp, key=len)
+                    if len(path_terminal_tmp) < len(path_terminal):
+                        path_terminal = path_terminal_tmp
 
             # delete old entry and add new with updated key
             teleport_dct_update.pop(key_tree, None)
