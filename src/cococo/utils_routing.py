@@ -789,7 +789,8 @@ class TeleportationRouter(BasicRouter):
 
         # for each already present path, choose one random ancilla terminal which is allowed to be on the same path, but not on another path
         for key, path in vdp_dict.items():
-            if isinstance(key, str) and key.startswith("idle"):
+            #if isinstance(key, str) and key.startswith("idle"):
+            if isinstance(key, tuple) and len(key) == 3 and key[0] in {"idle", "idle_back"}:
                 continue  # we do not want to create a tree at an idling path!
             other_paths = [
                 pos for keyy, path in vdp_dict.items() if keyy != key for pos in path
@@ -874,14 +875,19 @@ class TeleportationRouter(BasicRouter):
                 }
         """
         def qubits_in_vdp_key(key):
-            if isinstance(key, str):
-                return []
-
-            if isinstance(key[0], tuple):
+            """
+            occupied logical qubits 
+            """
+            #if isinstance(key, str):
+            #    return []
+            if isinstance(key, tuple) and len(key) == 3 and key[0] in {"idle", "idle_back"}:
+                return [key[1]]
+            
+            elif isinstance(key[0], tuple):
                 # CNOT key: ((x1, y1), (x2, y2))
                 return [key[0], key[1]]
 
-            if isinstance(key[0], int):
+            elif isinstance(key[0], int):
                 # T-gate key: (x, y)
                 return [key]
 
@@ -889,10 +895,14 @@ class TeleportationRouter(BasicRouter):
 
 
         def occupied_nodes_from_vdp(vdp_dict):
+            """
+            occupied ancillas for paths in vdp_dct 
+            """
             occupied = set()
             for key, path in vdp_dict.items():
                 #occupied.update(path)
-                if isinstance(key, str): # idle 
+                #if isinstance(key, str): # idle 
+                if isinstance(key, tuple) and len(key)==3 and key[0] in {"idle", "idle_back"}:
                     occupied.update(path[1:])
                 elif isinstance(key[0], tuple): # CNOT
                     occupied.update(path[1:-1])
@@ -1066,7 +1076,8 @@ class TeleportationRouter(BasicRouter):
 
             # remove nodes from vdp dict (the tree is not allowed to be on or cross another path)
             for path_label, path in vdp_dict.items():
-                if isinstance(path_label, str):
+                #if isinstance(path_label, str):
+                if isinstance(path_label, tuple) and len(path_label) == 3 and path_label[0] in {"idle", "idle_back"}:
                     nodes_to_delete = path[1:]  # for idle move you need to delete more
                 elif isinstance(path_label[0], tuple):  # cnot
                     nodes_to_delete = path[1:-1]
@@ -1191,7 +1202,8 @@ class TeleportationRouter(BasicRouter):
                 #g_temp_temp = g_temp.copy()
                 g_tt.remove_nodes_from(other_paths)
                 for path_label, path in vdp_dict.items():
-                    if isinstance(path_label, str):
+                    #if isinstance(path_label, str):
+                    if isinstance(path_label, tuple) and len(path_label) == 3 and path_label[0] in {"idle", "idle_back"}:
                         nodes_to_delete = path[1:]  
                     else:
                         nodes_to_delete = path[1:-1]
@@ -1734,7 +1746,8 @@ class TeleportationRouter(BasicRouter):
                     # danger_qubits_copy.remove(danger_qubit)
                     del danger_qubits_copy[danger_qubit]
                     available_gaps.remove(gap)
-                    label_idle = f"idle_{danger_qubit}_to_{gap}"
+                    #label_idle = f"idle_{danger_qubit}_to_{gap}"
+                    label_idle = ("idle_back", danger_qubit, gap)
                     vdp_dict.update({label_idle: path_idle}) 
                     idle_move_labels.append(label_idle)
                     logical_pos_temp = self.replace_pos(
@@ -2351,17 +2364,19 @@ class TeleportationRouter(BasicRouter):
                         new_idle_moves = [
                             x
                             for x in schedule[-1]["vdp_dict"].keys()
-                            if isinstance(x, str) and x.startswith("idle")
+                            if isinstance(x, tuple) and x[0] == "idle_back"
+                            #if isinstance(x, str) and x.startswith("idle")
                         ]
                         danger_gap_list = []
-                        for label_idle in new_idle_moves:
-                            parts = label_idle.split("_") # label_idle = f"idle_{danger_qubit}_to_{gap}"
-                            danger_qubit = parts[1]
-                            gap = parts[3]
-                            danger_qubit = tuple(
-                                map(int, danger_qubit.strip("()").split(","))
-                            )  # into tuple again
-                            gap = tuple(map(int, gap.strip("()").split(",")))
+                        for idle_key in new_idle_moves:
+                            #parts = label_idle.split("_") # label_idle = f"idle_{danger_qubit}_to_{gap}"
+                            #danger_qubit = parts[1]
+                            #gap = parts[3]
+                            #danger_qubit = tuple(
+                            #    map(int, danger_qubit.strip("()").split(","))
+                            #)  # into tuple again
+                            #gap = tuple(map(int, gap.strip("()").split(",")))
+                            _, danger_qubit, gap = idle_key
                             danger_gap_list.append((danger_qubit, gap))
                         # also layers_after_k need to be updated if there was something moved back
                         for danger_qubit, gap in danger_gap_list:
