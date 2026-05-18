@@ -866,12 +866,12 @@ class TeleportationRouter(BasicRouter):
         max_idle_moves: int | None = None,
     ):
         """
-        Initialize random idle-qubit teleportation moves.
+        Initialize max_idle_moves of random idle-qubit teleportation moves.
 
         Returns:
             idle_move_dct:
                 {
-                    ("idle", q, terminal): path_idle
+                    ("idle", q, terminal): (path_idle, None)
                 }
         """
         def qubits_in_vdp_key(key):
