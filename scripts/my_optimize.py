@@ -48,7 +48,7 @@ print("number of gates: ", len(pairs))
 
 # terminal pairs indicate the 2d coordinates 
 terminal_pairs = layouts.translate_layout_circuit(pairs, layout) #let's stick to the simple layout
-print("terminal pairs: ", terminal_pairs)
+#print("terminal pairs: ", terminal_pairs)
 
 router = utils.BasicRouter(g, data_qubit_locs, factories, valid_path = "cc", t=t, metric = "exact", use_dag = True)
 # each layer has disjoint logical support, however it doesn't guarantee that all those gates can be physically routed at the same time on the lattice
@@ -92,7 +92,7 @@ schedule, _ = router.optimize_layers(
         reduce_init_steiner = False,
         stimtest = True, 
         include_steiner_teleport = True,
-        include_idle_teleport = True, )
+        include_idle_teleport = False, )
 
 print("Len of schedule with teleport router: ", len(schedule))
 print("Reduction Delta: ", len(vdp_layers) - len(schedule))

@@ -13,6 +13,7 @@ from datetime import datetime
 import cococo.internal_testing as tst
 import cococo.dag_helper as dag_helper
 import copy 
+from pprint import pprint
 
 import sys
 import logging
@@ -789,8 +790,7 @@ class TeleportationRouter(BasicRouter):
 
         # for each already present path, choose one random ancilla terminal which is allowed to be on the same path, but not on another path
         for key, path in vdp_dict.items():
-            #if isinstance(key, str) and key.startswith("idle"):
-            if isinstance(key, tuple) and len(key) == 3 and key[0] in {"idle", "idle_back"}:
+            if isinstance(key, str) and key.startswith("idle"):
                 continue  # we do not want to create a tree at an idling path!
             other_paths = [
                 pos for keyy, path in vdp_dict.items() if keyy != key for pos in path
@@ -854,6 +854,9 @@ class TeleportationRouter(BasicRouter):
             steiner_dct.update({tup: [pathcopy, path_steiner]})
             # also remove the nodes from the graph such that no overlapping steiner trees can be generated
             g_temp.remove_nodes_from(path_steiner)
+
+        #print("steiner dict: ", steiner_dct)
+        
         return steiner_dct
 
     
@@ -875,19 +878,14 @@ class TeleportationRouter(BasicRouter):
                 }
         """
         def qubits_in_vdp_key(key):
-            """
-            occupied logical qubits 
-            """
-            #if isinstance(key, str):
-            #    return []
-            if isinstance(key, tuple) and len(key) == 3 and key[0] in {"idle", "idle_back"}:
-                return [key[1]]
-            
-            elif isinstance(key[0], tuple):
+            if isinstance(key, str):
+                return []
+
+            if isinstance(key[0], tuple):
                 # CNOT key: ((x1, y1), (x2, y2))
                 return [key[0], key[1]]
 
-            elif isinstance(key[0], int):
+            if isinstance(key[0], int):
                 # T-gate key: (x, y)
                 return [key]
 
@@ -895,14 +893,10 @@ class TeleportationRouter(BasicRouter):
 
 
         def occupied_nodes_from_vdp(vdp_dict):
-            """
-            occupied ancillas for paths in vdp_dct 
-            """
             occupied = set()
             for key, path in vdp_dict.items():
                 #occupied.update(path)
-                #if isinstance(key, str): # idle 
-                if isinstance(key, tuple) and len(key)==3 and key[0] in {"idle", "idle_back"}:
+                if isinstance(key, str): # idle 
                     occupied.update(path[1:])
                 elif isinstance(key[0], tuple): # CNOT
                     occupied.update(path[1:-1])
@@ -1066,18 +1060,23 @@ class TeleportationRouter(BasicRouter):
                 )
 
             # a terminal can be placed on the path. in this case you are NOT allowed to remove it! the above somehow sometimes add terminal, hence remove it again
-            if terminal in other_paths:
-                other_paths.remove(terminal)
-            if path2 and path2[0] in other_paths:
-                other_paths.remove(path2[0])
+            #if terminal in other_paths:
+            #    other_paths.remove(terminal)
+            #if path2 and path2[0] in other_paths:
+            #    other_paths.remove(path2[0])
+
+            protected = {terminal}
+            if path2:
+                protected.add(path2[0])
+            other_paths = [node for node in other_paths if node not in protected]
 
             #g_temp_temp = g_temp.copy()
             g_temp.remove_nodes_from(other_paths)
 
+            
             # remove nodes from vdp dict (the tree is not allowed to be on or cross another path)
             for path_label, path in vdp_dict.items():
-                #if isinstance(path_label, str):
-                if isinstance(path_label, tuple) and len(path_label) == 3 and path_label[0] in {"idle", "idle_back"}:
+                if isinstance(path_label, str):
                     nodes_to_delete = path[1:]  # for idle move you need to delete more
                 elif isinstance(path_label[0], tuple):  # cnot
                     nodes_to_delete = path[1:-1]
@@ -1099,12 +1098,16 @@ class TeleportationRouter(BasicRouter):
                     g_temp, terminal, cutoff=radius
                 ).keys()
             )
+            neighborhood = sorted(neighborhood)
+            #print("neighborhood", neighborhood)
+            
+            #print("g_temp", g_temp)
             
             # the single source shortest path,... ensures that only reachable nodes are included
             # choose one of them
             if len(neighborhood) == 1:  # if only one neighbor, i.e. the terminal itself
                 # new_terminal = None #to skip the updating of the root node below.
-                continue
+                break
             if key_tree[0] == "idle":
                 path_terminal = None
                 while True:
@@ -1128,6 +1131,7 @@ class TeleportationRouter(BasicRouter):
                     if new_terminal == terminal:  # do not want same terminal again
                         continue
                     try:
+                        #print("new terminal: ", new_terminal)
                         path_terminal = nx.dijkstra_path(g_temp, path2[0], new_terminal)  # path2[0] is the connecting node on the path
                     except nx.NetworkXNoPath:
                         warnings.warn(
@@ -1136,21 +1140,19 @@ class TeleportationRouter(BasicRouter):
                     if path_terminal:
                         break
 
-                    #!TODO should i skip this since we do it globally afterwards again?
-                    # (A) loop to possibly find shorter path_terminal
-                    paths_lst_temp = []  # collect all paths from path1[1:-1] to new_terminal
-                    for node_on_path in path1[1:-1]:
-                        try:
-                            path_temp = nx.dijkstra_path(
-                                g_temp, node_on_path, new_terminal
-                            )
-                            paths_lst_temp.append(path_temp)
-                        except nx.NetworkXNoPath:
-                            pass
-                    if paths_lst_temp:
-                        path_terminal_tmp = min(paths_lst_temp, key=len)
-                    if len(path_terminal_tmp) < len(path_terminal):
-                        path_terminal = path_terminal_tmp
+            #!TODO should i skip this since we do it globally afterwards again?
+            # (A) loop to possibly find shorter path_terminal
+            paths_lst_temp = []  # collect all paths from path1[1:-1] to new_terminal
+            for node_on_path in path1[1:-1]:
+                try:
+                    path_temp = nx.dijkstra_path(
+                        g_temp, node_on_path, new_terminal
+                    )
+                    paths_lst_temp.append(path_temp)
+                except nx.NetworkXNoPath:
+                    pass
+            if paths_lst_temp:
+                path_terminal = min(paths_lst_temp, key=len)
 
             # delete old entry and add new with updated key
             teleport_dct_update.pop(key_tree, None)
@@ -1189,21 +1191,25 @@ class TeleportationRouter(BasicRouter):
                     raise ValueError("steiner dct keys are wrong.")
                 other_paths = [
                     pos
-                    for keyy, path_pair in teleport_dct_update.items()
+                    for keyy, path_pair in teleport_dct_update_second.items()
                     if keyy != key_tree
                     for pos in occupied_nodes_for_others(keyy, path_pair)
                 ]
-                if terminal in other_paths:
-                    other_paths.remove(terminal)
-                if path2 and path2[0] in other_paths:
-                    other_paths.remove(path2[0])
                 #if terminal in other_paths:
                 #    other_paths.remove(terminal)
+                #if path2 and path2[0] in other_paths:
+                #    other_paths.remove(path2[0])
+                #if terminal in other_paths:
+                #    other_paths.remove(terminal)
+                protected = {terminal}
+                if path2:
+                    protected.add(path2[0])
+                other_paths = [node for node in other_paths if node not in protected]
+
                 #g_temp_temp = g_temp.copy()
                 g_tt.remove_nodes_from(other_paths)
                 for path_label, path in vdp_dict.items():
-                    #if isinstance(path_label, str):
-                    if isinstance(path_label, tuple) and len(path_label) == 3 and path_label[0] in {"idle", "idle_back"}:
+                    if isinstance(path_label, str):
                         nodes_to_delete = path[1:]  
                     else:
                         nodes_to_delete = path[1:-1]
@@ -1255,6 +1261,8 @@ class TeleportationRouter(BasicRouter):
             teleport_dct_update_second = teleport_dct_update
             g_tt = self.g.copy()
             g_tt.remove_nodes_from(self.factory_pos)
+
+        #print("teleport dct after perturbation: ", teleport_dct_update_second)
         return teleport_dct_update_second, g_tt
     @staticmethod
     def replace_pos(lst: list[tuple[pos, pos] | pos], old: pos, new: pos):
@@ -1746,8 +1754,7 @@ class TeleportationRouter(BasicRouter):
                     # danger_qubits_copy.remove(danger_qubit)
                     del danger_qubits_copy[danger_qubit]
                     available_gaps.remove(gap)
-                    #label_idle = f"idle_{danger_qubit}_to_{gap}"
-                    label_idle = ("idle_back", danger_qubit, gap)
+                    label_idle = f"idle_{danger_qubit}_to_{gap}"
                     vdp_dict.update({label_idle: path_idle}) 
                     idle_move_labels.append(label_idle)
                     logical_pos_temp = self.replace_pos(
@@ -2045,8 +2052,8 @@ class TeleportationRouter(BasicRouter):
                 # store improvement history
                 improvement_history.append((best_cost, cost_history[0]))
 
-            print("best_steiner_init: ", best_steiner_init)
-            print("best_idle_init: ", best_idle_init)
+            #print("best_steiner_init: ", best_steiner_init)
+            #print("best_idle_init: ", best_idle_init)
 
             # do not use a steiner if the SA could not find a good best_steiner. then it is set to none
             if not best_steiner_init and not best_idle_init:  # break earlier, similar to above
@@ -2364,19 +2371,17 @@ class TeleportationRouter(BasicRouter):
                         new_idle_moves = [
                             x
                             for x in schedule[-1]["vdp_dict"].keys()
-                            if isinstance(x, tuple) and x[0] == "idle_back"
-                            #if isinstance(x, str) and x.startswith("idle")
+                            if isinstance(x, str) and x.startswith("idle")
                         ]
                         danger_gap_list = []
-                        for idle_key in new_idle_moves:
-                            #parts = label_idle.split("_") # label_idle = f"idle_{danger_qubit}_to_{gap}"
-                            #danger_qubit = parts[1]
-                            #gap = parts[3]
-                            #danger_qubit = tuple(
-                            #    map(int, danger_qubit.strip("()").split(","))
-                            #)  # into tuple again
-                            #gap = tuple(map(int, gap.strip("()").split(",")))
-                            _, danger_qubit, gap = idle_key
+                        for label_idle in new_idle_moves:
+                            parts = label_idle.split("_") # label_idle = f"idle_{danger_qubit}_to_{gap}"
+                            danger_qubit = parts[1]
+                            gap = parts[3]
+                            danger_qubit = tuple(
+                                map(int, danger_qubit.strip("()").split(","))
+                            )  # into tuple again
+                            gap = tuple(map(int, gap.strip("()").split(",")))
                             danger_gap_list.append((danger_qubit, gap))
                         # also layers_after_k need to be updated if there was something moved back
                         for danger_qubit, gap in danger_gap_list:
