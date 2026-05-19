@@ -8,7 +8,7 @@ def extract_gates_schedule(schedule):
     for i in range(len(schedule)):
         gates_temp = list(schedule[i]["vdp_dict"].keys())
         #gates_temp = [el for el in gates_temp if not isinstance(el, str)]
-        gates_temp = [el for el in gates_temp if not el[0] in {"idle", "idle_back"}]
+        gates_temp = [el for el in gates_temp if not el[0] in {"idle_back"}]
         gates += gates_temp
     return gates
 
@@ -19,7 +19,7 @@ def extract_gates_schedule_respect_layout(schedule):
     for i in range(len(schedule)):
         gates_temp = list(schedule[i]["vdp_dict"].keys())
         #gates_temp = [el for el in gates_temp if not isinstance(el, str)]
-        gates_temp = [el for el in gates_temp if not el[0] in {"idle", "idle_back"}]
+        gates_temp = [el for el in gates_temp if not el[0] in {"idle_back"}]
         layout = schedule[i]["layout"]
         layout_rev = {j: i for i, j in layout.items()}
         # gates_temp = [(layout_rev[el[0]], layout_rev[el[1]]) for el in gates_temp]

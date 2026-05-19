@@ -37,7 +37,7 @@ q = len(data_qubit_locs)
 print("number of data qubits: ", q)
 j = 8
 num_gates = q*2
-#num_gates = 10
+#num_gates = 60
 
 
 # j gates per layer on q qubits 

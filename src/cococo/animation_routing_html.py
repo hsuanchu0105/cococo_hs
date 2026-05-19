@@ -1256,28 +1256,58 @@ def _draw_clean_layer(
     # ------------------------------------------------------------------
     # 10. Small text box.
     # ------------------------------------------------------------------
+    #if show_move_text:
+    #    if frame.move_events:
+    #        text = "\n".join(mv.label for mv in frame.move_events)
+    ##    else:
+     #       text = "No logical-qubit relocation in this layer"
+
+    #    ax.text(
+    #        0.01,
+    #        0.02,
+    #        text,
+    #        transform=ax.transAxes,
+    #        fontsize=10,
+    #        ha="left",
+    #        va="bottom",
+    #        bbox=dict(
+    #            boxstyle="round",
+    #            facecolor="white",
+    #            edgecolor="lightgray",
+    #            alpha=0.88,
+    #        ),
+    #    )
     if show_move_text:
         if frame.move_events:
             text = "\n".join(mv.label for mv in frame.move_events)
         else:
             text = "No logical-qubit relocation in this layer"
 
+        # Get current graph limits.
+        x_min, x_max = ax.get_xlim()
+        y_min, y_max = ax.get_ylim()
+
+        # Add extra vertical space below the lattice.
+        y_range = y_max - y_min
+        extra_bottom_space = 0.22 * y_range
+        ax.set_ylim(y_min - extra_bottom_space, y_max)
+
+        # Put the text box in data coordinates, below the graph.
         ax.text(
-            0.01,
-            0.02,
+            x_min,
+            y_min - 0.08 * y_range,
             text,
-            transform=ax.transAxes,
             fontsize=10,
             ha="left",
-            va="bottom",
+            va="top",
             bbox=dict(
                 boxstyle="round",
                 facecolor="white",
                 edgecolor="lightgray",
-                alpha=0.88,
+                alpha=0.92,
             ),
+            zorder=100,
         )
-
 
 def make_clean_routing_html_animation(
     g: nx.Graph,
