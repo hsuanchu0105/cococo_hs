@@ -57,7 +57,7 @@ vdp_layers, _ = router.find_total_vdp_layers_dyn(layers, data_qubit_locs, router
 print("Len of schedule without teleportation: ", len(vdp_layers))
 
 
-router = utils.TeleportationRouter(g, data_qubit_locs, factories, valid_path="cc", t=t, metric="exact", use_dag = True, seed = 49218)
+router = utils.TeleportationRouter(g, data_qubit_locs, factories, valid_path="cc", t=t, metric="exact", use_dag = True, seed =  49218  )
 layers = router.split_layer_terminal_pairs(terminal_pairs)
 
 max_iters = 100
