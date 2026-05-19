@@ -28,7 +28,7 @@ logger.handlers = [handler]
 
 pos = list[int, int] #! TODO should this be tuple[int, int]
 lock_penalty = 200
-max_idle_teleport = 2
+max_idle_teleport = 5
 
 
 class BasicRouter:
@@ -1426,10 +1426,10 @@ class TeleportationRouter(BasicRouter):
                 if is_idle:
                     move_type = "idle"
                     _, q, terminal = key_candidate
-                    next_layers_copy = self.update_layers(next_layers_copy, q, terminal)
-                    logical_pos_temp = self.replace_pos(logical_pos_temp, q, terminal)
-                    label = layout_rev[q]
-                    layout_mod[label] = terminal
+                    #next_layers_copy = self.update_layers(next_layers_copy, q, terminal)
+                    #logical_pos_temp = self.replace_pos(logical_pos_temp, q, terminal)
+                    #label = layout_rev[q]
+                    #layout_mod[label] = terminal
                     move_type_lst_temp.update({("idle", q, terminal): move_type})
 
                 elif len(key_candidate) == 3:
@@ -1523,6 +1523,7 @@ class TeleportationRouter(BasicRouter):
         best_schedule = None
 
         teleport_dct = {**steiner_dct, **idle_dct}
+        
 
         for r in range(1, len(teleport_dct) + 1):
             for subset in itertools.combinations(teleport_dct.items(), r):
@@ -2002,9 +2003,11 @@ class TeleportationRouter(BasicRouter):
                     idle_move_dct = self.initialize_idle_moves(
                         vdp_dict, steiner_dct, layout, max_idle_teleport
                     )
+                    #print("idle_move_dct: ", idle_move_dct)
 
 
             if len(steiner_dct) == 0 and len(idle_move_dct) == 0:
+                print("steiner dct and idle move dct both empty")
                 best_steiner_init = None
                 best_idle_init = None
 
@@ -2035,8 +2038,8 @@ class TeleportationRouter(BasicRouter):
                 )
                 improvement_history.append((best_cost, cost_history[0]))
 
-            #print("best_steiner_init: ", best_steiner_init)
-            #print("best_idle_init: ", best_idle_init)
+            print("best_steiner_init: ", best_steiner_init)
+            print("best_idle_init: ", best_idle_init)
 
             # do not use a steiner if the SA could not find a good best_steiner. then it is set to none
             if not best_steiner_init and not best_idle_init:  # break earlier, similar to above
