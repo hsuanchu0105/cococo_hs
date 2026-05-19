@@ -1426,10 +1426,10 @@ class TeleportationRouter(BasicRouter):
                 if is_idle:
                     move_type = "idle"
                     _, q, terminal = key_candidate
-                    #next_layers_copy = self.update_layers(next_layers_copy, q, terminal)
-                    #logical_pos_temp = self.replace_pos(logical_pos_temp, q, terminal)
-                    #label = layout_rev[q]
-                    #layout_mod[label] = terminal
+                    next_layers_copy = self.update_layers(next_layers_copy, q, terminal)
+                    logical_pos_temp = self.replace_pos(logical_pos_temp, q, terminal)
+                    label = layout_rev[q]
+                    layout_mod[label] = terminal
                     move_type_lst_temp.update({("idle", q, terminal): move_type})
 
                 elif len(key_candidate) == 3:
@@ -2172,6 +2172,7 @@ class TeleportationRouter(BasicRouter):
                 schedule_temp["cost_history"] = cost_history
 
                 schedule.append(schedule_temp)
+                print("best idle added: ", schedule_temp["idle_teleport"])
             else:
                 danger_qubits_temp = {}  # trivial lists to avoid error below
                 available_gaps_temp = []
@@ -2360,7 +2361,7 @@ class TeleportationRouter(BasicRouter):
                             if isinstance(x, tuple) and x[0] == "idle_back"
                         ]
                         danger_gap_list = []
-                        for label_idle in new_idle_moves:
+                        for idle_key in new_idle_moves:
                             #parts = label_idle.split("_") # label_idle = f"idle_{danger_qubit}_to_{gap}"
                             #danger_qubit = parts[1]
                             #gap = parts[3]
