@@ -168,7 +168,7 @@ def gen_gates(example: int):
         pairs = [(1, 3), (0, 2), (4, 1), (2, 3), (3, 4), (1, 2)]   
     return pairs 
 
-example = 3
+example = 2
 g, data_qubit_locs, factory_ring = gen_toy_model(example)
 layout = {i: pos for i, pos in enumerate(data_qubit_locs)}
 factories = []
@@ -222,7 +222,7 @@ schedule, _ = router.optimize_layers(
         reduce_init_steiner = False,
         stimtest = True, 
         include_steiner_teleport = True,
-        include_idle_teleport = True, )
+        include_idle_teleport = False, )
 
 print("Len of schedule with teleport router: ", len(schedule))
 print("Reduction Delta: ", len(vdp_layers) - len(schedule))

@@ -2067,6 +2067,8 @@ class TeleportationRouter(BasicRouter):
                     if len(best_steiner) + len(best_idle) < len(best_steiner_init) + len(best_idle_init):
                         logger.info("Complexity of teleportation could be reduced.")
                     best_schedule = best_schedule_temp.copy()
+                    print("best steiner after reduce: ", best_steiner)
+                    print("best idle after reduce: ", best_idle)
 
                 else:
                     best_steiner = best_steiner_init  # only rename
@@ -2172,7 +2174,7 @@ class TeleportationRouter(BasicRouter):
                 schedule_temp["cost_history"] = cost_history
 
                 schedule.append(schedule_temp)
-                print("best idle added: ", schedule_temp["idle_teleport"])
+                #print("best idle added: ", schedule_temp["idle_teleport"])
             else:
                 danger_qubits_temp = {}  # trivial lists to avoid error below
                 available_gaps_temp = []

@@ -60,7 +60,7 @@ print("Len of schedule without teleportation: ", len(vdp_layers))
 router = utils.TeleportationRouter(g, data_qubit_locs, factories, valid_path="cc", t=t, metric="exact", use_dag = True, seed =  49218  )
 layers = router.split_layer_terminal_pairs(terminal_pairs)
 
-max_iters = 100
+max_iters = 10
 T_start = 100.0
 T_end = 0.1
 alpha = 0.95
@@ -73,7 +73,7 @@ steiner_init_type = "full_random"
 jump_harvesting = True
 stimtest = True
 
-reduce_steiner = True
+reduce_teleport = True
 idle_move_type = "later"
 
 schedule, _ = router.optimize_layers(        
@@ -87,12 +87,12 @@ schedule, _ = router.optimize_layers(
         k_lookahead = k_lookahead,
         steiner_init_type = steiner_init_type,
         jump_harvesting = jump_harvesting,
-        reduce_teleport = reduce_steiner,
+        reduce_teleport = reduce_teleport,
         idle_move_type = idle_move_type,
         reduce_init_steiner = False,
         stimtest = True, 
         include_steiner_teleport = True,
-        include_idle_teleport = True, )
+        include_idle_teleport = False, )
 
 print("Len of schedule with teleport router: ", len(schedule))
 print("Reduction Delta: ", len(vdp_layers) - len(schedule))
