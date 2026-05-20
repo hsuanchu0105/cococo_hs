@@ -745,6 +745,24 @@ class TeleportationRouter(BasicRouter):
         self.seed = seed
         random.seed(seed)
 
+    def reduce_vdp_dct(self, layers, k_lookahead, vdp_dict):
+        if layers is not None and k_lookahead is not None:
+            layers_temp = layers[:k_lookahead]
+            terminals = []
+            for layer in layers_temp:
+                #! TODO double check whether it's layer or layers
+                terminals += layer
+            qubits_k_lookahead = [t for outer in terminals for t in outer]
+            # remove those from vdp_dict which are not used, such that no tree is created for them
+            vdp_dict_reduced = {}
+            for key, val in vdp_dict.items():
+                if key[0] in qubits_k_lookahead or key[1] in qubits_k_lookahead:
+                    vdp_dict_reduced.update({key: val})
+                if key[0] == "idle_back" and key[2] in qubits_k_lookahead:
+                    vdp_dict_reduced.update({key: val})
+
+        return vdp_dict_reduced
+    
     def initialize_steiner(
         self, vdp_dict, steiner_init_type: str, layers=None, k_lookahead=None
     ):
@@ -758,20 +776,7 @@ class TeleportationRouter(BasicRouter):
         Therefore, layers and k_lookahead default to None.
         """
         # find out which qubits are actually moved in layers[:k_lookahead]
-        if layers is not None and k_lookahead is not None:
-            layers_temp = layers[:k_lookahead]
-            terminals = []
-            for layer in layers_temp:
-                #! TODO double check whether it's layer or layers
-                terminals += layer
-            qubits_k_lookahead = [t for outer in terminals for t in outer]
-            # remove those from vdp_dict which are not used, such that no tree is created for them
-            vdp_dict_reduced = {}
-            for key, val in vdp_dict.items():
-                if key[0] in qubits_k_lookahead or key[1] in qubits_k_lookahead:
-                    vdp_dict_reduced.update({key: val})
-
-            vdp_dict = vdp_dict_reduced
+        vdp_dict = self.reduce_vdp_dct(layers, k_lookahead, vdp_dict)
 
         # remove the nodes from the graph which are already occupied by the magic/logical patches
         # we allow the 3-terminal to be placed on the path, thus the graph must be adapted per terminal choice
@@ -864,8 +869,9 @@ class TeleportationRouter(BasicRouter):
         self,
         vdp_dict: dict,
         steiner_dct: dict,
-        layout: dict,
         max_idle_moves: int | None = None,
+        layers = None, 
+        k_lookahead = None, 
     ):
         """
         Initialize random idle-qubit teleportation moves.
@@ -917,16 +923,16 @@ class TeleportationRouter(BasicRouter):
 
             return occupied
         
-        logical_positions = list(layout.values())
+        #logical_positions = list(layout.values())
+
+        vdp_dict = self.reduce_vdp_dct(layers, k_lookahead, vdp_dict)
 
         active_qubits = set()
-        
-        
         for key in vdp_dict:
             active_qubits.update(qubits_in_vdp_key(key))
 
         idle_qubits = [
-            q for q in logical_positions
+            q for q in self.logical_pos
             if q not in active_qubits
         ]
 
@@ -955,7 +961,7 @@ class TeleportationRouter(BasicRouter):
             g_temp.remove_nodes_from(used_idle_paths)
 
             # Remove all other logical qubits.
-            for pos in logical_positions:
+            for pos in self.logical_pos:
                 if pos != q and pos in g_temp.nodes:
                     g_temp.remove_node(pos)
 
@@ -1831,10 +1837,11 @@ class TeleportationRouter(BasicRouter):
         jump_harvesting: str,
         reduce_teleport: bool,
         idle_move_type: str,
-        reduce_init_steiner: bool = False,
-        stimtest: bool = False,
         include_steiner_teleport: bool = True,
         include_idle_teleport: bool= False,
+        reduce_init_steiner: bool = False,
+        reduce_init_idle: bool = False, 
+        stimtest: bool = False,
     ):
         """
         Optimize the positions in batches of size k_lookahead.
@@ -1980,28 +1987,33 @@ class TeleportationRouter(BasicRouter):
             steiner_dct = {}
             idle_move_dct = {}
 
+
+            layers_steiner = None
+            k_steiner = None 
+            layers_idle = None
+            k_idle = None
+
+            if reduce_init_steiner:
+                layers_steiner = layers
+                k_steiner = k_lookahead             
+            if reduce_init_idle:
+                layers_idle = layers
+                k_idle = k_lookahead 
+            
+
             if include_steiner_teleport:
-                if reduce_init_steiner:
-                    steiner_dct = self.initialize_steiner(
-                        vdp_dict, steiner_init_type, layers=layers, k_lookahead=k_lookahead
+                steiner_dct = self.initialize_steiner(
+                    vdp_dict, steiner_init_type, layers=layers_steiner, k_lookahead=k_steiner
+                )
+                if include_idle_teleport:
+                    idle_move_dct = self.initialize_idle_moves(
+                        vdp_dict, steiner_dct, max_idle_teleport, layers = layers_idle, k_lookahead = k_idle
                     )
-                    if include_idle_teleport:
-                        idle_move_dct = self.initialize_idle_moves(
-                            vdp_dict, steiner_dct, layout, max_idle_teleport
-                        )
-                else:
-                    steiner_dct = self.initialize_steiner(
-                    vdp_dict, steiner_init_type, layers=None, k_lookahead=None
-                    )
-                    if include_idle_teleport:
-                        idle_move_dct = self.initialize_idle_moves(
-                            vdp_dict, steiner_dct, layout, max_idle_teleport
-                        )
 
             else:
                 if include_idle_teleport:
                     idle_move_dct = self.initialize_idle_moves(
-                        vdp_dict, steiner_dct, layout, max_idle_teleport
+                        vdp_dict, steiner_dct, max_idle_teleport, layers = layers_idle, k_lookahead = k_idle
                     )
                     #print("idle_move_dct: ", idle_move_dct)
 

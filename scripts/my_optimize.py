@@ -89,10 +89,12 @@ schedule, _ = router.optimize_layers(
         jump_harvesting = jump_harvesting,
         reduce_teleport = reduce_teleport,
         idle_move_type = idle_move_type,
+        include_steiner_teleport = False,
+        include_idle_teleport = True,
         reduce_init_steiner = False,
+        reduce_init_idle = True, 
         stimtest = True, 
-        include_steiner_teleport = True,
-        include_idle_teleport = False, )
+    )
 
 print("Len of schedule with teleport router: ", len(schedule))
 print("Reduction Delta: ", len(vdp_layers) - len(schedule))
