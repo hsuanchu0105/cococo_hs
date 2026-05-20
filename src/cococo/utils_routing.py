@@ -745,23 +745,6 @@ class TeleportationRouter(BasicRouter):
         self.seed = seed
         random.seed(seed)
 
-    def reduce_vdp_dct(self, layers, k_lookahead, vdp_dict):
-        if layers is not None and k_lookahead is not None:
-            layers_temp = layers[:k_lookahead]
-            terminals = []
-            for layer in layers_temp:
-                #! TODO double check whether it's layer or layers
-                terminals += layer
-            qubits_k_lookahead = [t for outer in terminals for t in outer]
-            # remove those from vdp_dict which are not used, such that no tree is created for them
-            vdp_dict_reduced = {}
-            for key, val in vdp_dict.items():
-                if key[0] in qubits_k_lookahead or key[1] in qubits_k_lookahead:
-                    vdp_dict_reduced.update({key: val})
-                if key[0] == "idle_back" and key[2] in qubits_k_lookahead:
-                    vdp_dict_reduced.update({key: val})
-
-        return vdp_dict_reduced
     
     def initialize_steiner(
         self, vdp_dict, steiner_init_type: str, layers=None, k_lookahead=None
@@ -775,9 +758,24 @@ class TeleportationRouter(BasicRouter):
         However, this turned out not to be really useful, because movements can be relevant even if this constraint does not hold.
         Therefore, layers and k_lookahead default to None.
         """
-        # find out which qubits are actually moved in layers[:k_lookahead]
-        vdp_dict = self.reduce_vdp_dct(layers, k_lookahead, vdp_dict)
 
+        vdp_dict_reduced = vdp_dict.copy()
+
+        # find out which qubits are actually moved in layers[:k_lookahead]
+        if layers is not None and k_lookahead is not None:
+            layers_temp = layers[:k_lookahead]
+            terminals = []
+            for layer in layers_temp:
+                #! TODO double check whether it's layer or layers
+                terminals += layer
+            qubits_k_lookahead = [t for outer in terminals for t in outer]
+            # remove those from vdp_dict which are not used, such that no tree is created for them
+            vdp_dict_reduced = {}
+            for key, val in vdp_dict.items():
+                if key[0] in qubits_k_lookahead or key[1] in qubits_k_lookahead:
+                    vdp_dict_reduced.update({key: val})
+
+        
         # remove the nodes from the graph which are already occupied by the magic/logical patches
         # we allow the 3-terminal to be placed on the path, thus the graph must be adapted per terminal choice
         # because for path a, you can place the terminal along path a, but not along path b
@@ -793,7 +791,7 @@ class TeleportationRouter(BasicRouter):
         steiner_dct = {}
 
         # for each already present path, choose one random ancilla terminal which is allowed to be on the same path, but not on another path
-        for key, path in vdp_dict.items():
+        for key, path in vdp_dict_reduced.items():
             if isinstance(key, tuple) and key[0] == "idle_back":
                 continue  # we do not want to create a tree at an idling path!
             other_paths = [
@@ -925,17 +923,28 @@ class TeleportationRouter(BasicRouter):
         
         #logical_positions = list(layout.values())
 
-        vdp_dict = self.reduce_vdp_dct(layers, k_lookahead, vdp_dict)
 
         active_qubits = set()
         for key in vdp_dict:
             active_qubits.update(qubits_in_vdp_key(key))
 
-        idle_qubits = [
-            q for q in self.logical_pos
-            if q not in active_qubits
-        ]
+        if layers is not None and k_lookahead is not None:
+            layers_temp = layers[:k_lookahead]
+            terminals = []
+            for layer in layers_temp:
+                terminals += layer
+            qubits_k_lookahead = [t for outer in terminals for t in outer]
+            idle_qubits = [
+                q for q in self.logical_pos
+                if q not in active_qubits and q in qubits_k_lookahead
+            ]
+        else:
+            idle_qubits = [
+                q for q in self.logical_pos
+                if q not in active_qubits
+            ]
 
+            
         random.shuffle(idle_qubits)
 
         if max_idle_moves is not None:
@@ -2019,7 +2028,7 @@ class TeleportationRouter(BasicRouter):
 
 
             if len(steiner_dct) == 0 and len(idle_move_dct) == 0:
-                print("steiner dct and idle move dct both empty")
+                #print("steiner dct and idle move dct both empty")
                 best_steiner_init = None
                 best_idle_init = None
 
@@ -2050,8 +2059,8 @@ class TeleportationRouter(BasicRouter):
                 )
                 improvement_history.append((best_cost, cost_history[0]))
 
-            print("best_steiner_init: ", best_steiner_init)
-            print("best_idle_init: ", best_idle_init)
+            #print("best_steiner_init: ", best_steiner_init)
+            #print("best_idle_init: ", best_idle_init)
 
             # do not use a steiner if the SA could not find a good best_steiner. then it is set to none
             if not best_steiner_init and not best_idle_init:  # break earlier, similar to above
@@ -2079,8 +2088,8 @@ class TeleportationRouter(BasicRouter):
                     if len(best_steiner) + len(best_idle) < len(best_steiner_init) + len(best_idle_init):
                         logger.info("Complexity of teleportation could be reduced.")
                     best_schedule = best_schedule_temp.copy()
-                    print("best steiner after reduce: ", best_steiner)
-                    print("best idle after reduce: ", best_idle)
+                    #print("best steiner after reduce: ", best_steiner)
+                    #print("best idle after reduce: ", best_idle)
 
                 else:
                     best_steiner = best_steiner_init  # only rename
