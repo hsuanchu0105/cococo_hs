@@ -880,7 +880,7 @@ class TeleportationRouter(BasicRouter):
                     ("idle", q, terminal): path_idle
                 }
         """
-        def qubits_in_vdp_key(key):
+        def logical_qbts_in_vdp(key):
             if isinstance(key, tuple) and key[0] == "idle_back":
                 return [key[1]]
 
@@ -895,7 +895,7 @@ class TeleportationRouter(BasicRouter):
             raise RuntimeError(f"Unexpected vdp key: {key}")
 
 
-        def occupied_nodes_from_vdp(vdp_dict):
+        def occupied_ancillas_from_vdp(vdp_dict):
             occupied = set()
             for key, path in vdp_dict.items():
                 #occupied.update(path)
@@ -926,8 +926,9 @@ class TeleportationRouter(BasicRouter):
 
         active_qubits = set()
         for key in vdp_dict:
-            active_qubits.update(qubits_in_vdp_key(key))
+            active_qubits.update(logical_qbts_in_vdp(key))
 
+        # only choose idle qubits which are active in future k layers
         if layers is not None and k_lookahead is not None:
             layers_temp = layers[:k_lookahead]
             terminals = []
@@ -944,14 +945,13 @@ class TeleportationRouter(BasicRouter):
                 if q not in active_qubits
             ]
 
-            
         random.shuffle(idle_qubits)
 
         if max_idle_moves is not None:
             idle_qubits = idle_qubits[:max_idle_moves]
 
         occupied = set()
-        occupied.update(occupied_nodes_from_vdp(vdp_dict))
+        occupied.update(occupied_ancillas_from_vdp(vdp_dict))
         occupied.update(occupied_nodes_from_steiner(steiner_dct)) 
 
         

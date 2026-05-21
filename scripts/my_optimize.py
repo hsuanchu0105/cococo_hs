@@ -11,7 +11,49 @@ import cococo.circuit_construction as circuit_construction
 import cococo.internal_testing as internal_testing
 import plotting
 
+def print_vdp_layers_with_qubit_labels(vdp_layers, layout):
+    """
+    Print vdp_layers layer by layer.
 
+    Converts gate keys from positions back to logical qubit labels using layout.
+
+    Args:
+        vdp_layers:
+            list of dictionaries, each dictionary maps gate -> path.
+            CNOT gate key: ((x1, y1), (x2, y2))
+            T gate key: (x, y)
+
+        layout:
+            dict like {qubit_label: position}
+    """
+    layout_rev = {pos: q for q, pos in layout.items()}
+
+    def gate_to_label(gate):
+        # CNOT gate: ((x1, y1), (x2, y2))
+        if isinstance(gate[0], tuple):
+            q1 = layout_rev.get(gate[0], gate[0])
+            q2 = layout_rev.get(gate[1], gate[1])
+            return (q1, q2)
+
+        # T gate / single-qubit gate: (x, y)
+        if isinstance(gate[0], int):
+            return layout_rev.get(gate, gate)
+
+        return gate
+
+    for layer_idx, layer in enumerate(vdp_layers):
+        print(f"\nLayer {layer_idx}")
+        print("-" * 40)
+
+        if not layer:
+            print("  empty layer")
+            continue
+
+        for gate, path in layer.items():
+            gate_label = gate_to_label(gate)
+            print(f"  gate {gate_label}:")
+            print(f"    position key = {gate}")
+            print(f"    path         = {path}")
 
 
 layout_type = "triple"
@@ -36,8 +78,8 @@ print("data qubit location", data_qubit_locs)
 q = len(data_qubit_locs)
 print("number of data qubits: ", q)
 j = 8
-num_gates = q*2
-#num_gates = 60
+#num_gates = q*2
+num_gates = 50
 
 
 # j gates per layer on q qubits 
@@ -48,7 +90,7 @@ print("number of gates: ", len(pairs))
 
 # terminal pairs indicate the 2d coordinates 
 terminal_pairs = layouts.translate_layout_circuit(pairs, layout) #let's stick to the simple layout
-#print("terminal pairs: ", terminal_pairs)
+print("terminal pairs: ", terminal_pairs)
 
 router = utils.BasicRouter(g, data_qubit_locs, factories, valid_path = "cc", t=t, metric = "exact", use_dag = True)
 # each layer has disjoint logical support, however it doesn't guarantee that all those gates can be physically routed at the same time on the lattice
@@ -56,6 +98,7 @@ layers = router.split_layer_terminal_pairs(terminal_pairs)
 vdp_layers, _ = router.find_total_vdp_layers_dyn(layers, data_qubit_locs, router.factory_times, layout, testing = True)
 print("Len of schedule without teleportation: ", len(vdp_layers))
 
+print_vdp_layers_with_qubit_labels(vdp_layers, layout)
 
 router = utils.TeleportationRouter(g, data_qubit_locs, factories, valid_path="cc", t=t, metric="exact", use_dag = True, seed =  49218  )
 layers = router.split_layer_terminal_pairs(terminal_pairs)
@@ -89,9 +132,9 @@ schedule, _ = router.optimize_layers(
         jump_harvesting = jump_harvesting,
         reduce_teleport = reduce_teleport,
         idle_move_type = idle_move_type,
-        include_steiner_teleport = False,
+        include_steiner_teleport = True,
         include_idle_teleport = True,
-        reduce_init_steiner = False,
+        reduce_init_steiner = True,
         reduce_init_idle = True, 
         stimtest = True, 
     )
