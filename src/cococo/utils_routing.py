@@ -766,7 +766,6 @@ class TeleportationRouter(BasicRouter):
             layers_temp = layers[:k_lookahead]
             terminals = []
             for layer in layers_temp:
-                #! TODO double check whether it's layer or layers
                 terminals += layer
             qubits_k_lookahead = [t for outer in terminals for t in outer]
             # remove those from vdp_dict which are not used, such that no tree is created for them
@@ -805,9 +804,7 @@ class TeleportationRouter(BasicRouter):
             path = path[1:-1]  # remove last and first node from the list because those are logical data patches
             random.shuffle(path)
             if steiner_init_type == "full_random":
-                for (
-                    node_on_path
-                ) in path:  # loop in case a random node has no other reachable nodes
+                for node_on_path in path:  # loop in case a random node has no other reachable nodes
                     # determine all reachable nodes from that chosen node
                     reachable_nodes = list(
                         nx.single_source_shortest_path_length(
@@ -882,7 +879,8 @@ class TeleportationRouter(BasicRouter):
         """
         def logical_qbts_in_vdp(key):
             if isinstance(key, tuple) and key[0] == "idle_back":
-                return [key[1]]
+                # logical qubits is in gap position after idle_move_back
+                return [key[2]]
 
             elif isinstance(key[0], tuple):
                 # CNOT key: ((x1, y1), (x2, y2))
@@ -1002,7 +1000,7 @@ class TeleportationRouter(BasicRouter):
         """
         def occupied_nodes_for_others(key, path_pair):
             """
-            collect the occupied nodes except logical qubits
+            collect the occupied nodes except logical data qubits
             """
             path1, path2 = path_pair
             nodes = []
@@ -1765,7 +1763,8 @@ class TeleportationRouter(BasicRouter):
 
                 path_idle = None
                 try:
-                    path_idle = nx.dijkstra_path(g_copy, danger_qubit, gap)
+                    path_idle = nx.dijkstra_path(g_copy, gap, danger_qubit)
+                    #path_idle = nx.dijkstra_path(g_copy, danger_qubit, gap)
                     # danger_qubits_copy.remove(danger_qubit)
                     del danger_qubits_copy[danger_qubit]
                     available_gaps.remove(gap)

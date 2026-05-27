@@ -68,7 +68,7 @@ t=2
 #print("layout: ", layout)
 
 #print(g)
-print("data qubit location", data_qubit_locs)
+#print("data qubit location", data_qubit_locs)
 
 #print("factory ring: ", factory_ring)
 
@@ -77,9 +77,8 @@ print("data qubit location", data_qubit_locs)
 
 q = len(data_qubit_locs)
 print("number of data qubits: ", q)
-j = 8
-#num_gates = q*2
-num_gates = 50
+j = 4
+num_gates = q*2
 
 
 # j gates per layer on q qubits 
@@ -90,7 +89,7 @@ print("number of gates: ", len(pairs))
 
 # terminal pairs indicate the 2d coordinates 
 terminal_pairs = layouts.translate_layout_circuit(pairs, layout) #let's stick to the simple layout
-print("terminal pairs: ", terminal_pairs)
+#print("terminal pairs: ", terminal_pairs)
 
 router = utils.BasicRouter(g, data_qubit_locs, factories, valid_path = "cc", t=t, metric = "exact", use_dag = True)
 # each layer has disjoint logical support, however it doesn't guarantee that all those gates can be physically routed at the same time on the lattice
@@ -98,7 +97,7 @@ layers = router.split_layer_terminal_pairs(terminal_pairs)
 vdp_layers, _ = router.find_total_vdp_layers_dyn(layers, data_qubit_locs, router.factory_times, layout, testing = True)
 print("Len of schedule without teleportation: ", len(vdp_layers))
 
-print_vdp_layers_with_qubit_labels(vdp_layers, layout)
+#print_vdp_layers_with_qubit_labels(vdp_layers, layout)
 
 router = utils.TeleportationRouter(g, data_qubit_locs, factories, valid_path="cc", t=t, metric="exact", use_dag = True, seed =  49218  )
 layers = router.split_layer_terminal_pairs(terminal_pairs)
@@ -149,7 +148,7 @@ import matplotlib as mpl
 
 mpl.rcParams["animation.embed_limit"] = 100  # MB
 Path("animation").mkdir(exist_ok=True)
-filename = f"animation/animation_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.html"
+filename = f"animation/triple_both_j4_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.html"
 
 anim = make_clean_routing_html_animation(
     g,
