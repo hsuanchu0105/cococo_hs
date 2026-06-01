@@ -28,7 +28,7 @@ logger.handlers = [handler]
 
 pos = list[int, int] #! TODO should this be tuple[int, int]
 lock_penalty = 200
-max_idle_teleport = 10
+
 
 
 class BasicRouter:
@@ -980,6 +980,7 @@ class TeleportationRouter(BasicRouter):
 
             if not reachable:
                 continue
+            
 
             terminal = random.choice(reachable)
             path_idle = nx.dijkstra_path(g_temp, q, terminal)
@@ -1841,6 +1842,7 @@ class TeleportationRouter(BasicRouter):
         alpha,
         radius,
         k_lookahead,
+        max_idle_teleport, 
         steiner_init_type,
         jump_harvesting: str,
         reduce_teleport: bool,

@@ -65,8 +65,9 @@ T_start = 100.0
 T_end = 0.1
 alpha = 0.95
 t=4 #mock value for cnot circuit
-radius = 15
+radius = 10
 k_lookahead = 5
+max_idle_teleport = 10
 metric = "exact"
 
 steiner_init_type = "full_random"
@@ -85,6 +86,7 @@ schedule, _ = router.optimize_layers(
         alpha,
         radius = radius,
         k_lookahead = k_lookahead,
+        max_idle_teleport = max_idle_teleport,
         steiner_init_type = steiner_init_type,
         jump_harvesting = jump_harvesting,
         reduce_teleport = reduce_teleport,
