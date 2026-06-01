@@ -15,7 +15,7 @@ import plotting
 
 layout_type = "single"
 m = 4
-n = 24
+n = 4
 factories = []
 remove_edges = False
 g, data_qubit_locs, factory_ring = layouts.gen_layout_scalable(layout_type, m, n, factories, remove_edges)
@@ -34,8 +34,8 @@ t=2
 
 q = len(data_qubit_locs)
 print("number of data qubits: ", q)
-j = 12
-num_gates = q*2
+j = 8
+num_gates = 60
 
 
 # j gates per layer on q qubits 
@@ -51,6 +51,7 @@ terminal_pairs = layouts.translate_layout_circuit(pairs, layout) #let's stick to
 router = utils.BasicRouter(g, data_qubit_locs, factories, valid_path = "cc", t=t, metric = "exact", use_dag = True)
 # each layer has disjoint logical support, however it doesn't guarantee that all those gates can be physically routed at the same time on the lattice
 layers = router.split_layer_terminal_pairs(terminal_pairs)
+print("logical depth: ", len(layers))
 vdp_layers, _ = router.find_total_vdp_layers_dyn(layers, data_qubit_locs, router.factory_times, layout, testing = True)
 print("Len of schedule without teleportation: ", len(vdp_layers))
 
@@ -88,9 +89,9 @@ schedule, _ = router.optimize_layers(
         jump_harvesting = jump_harvesting,
         reduce_teleport = reduce_teleport,
         idle_move_type = idle_move_type,
-        include_steiner_teleport = True,
+        include_steiner_teleport = False,
         include_idle_teleport = True,
-        reduce_init_steiner = True,
+        reduce_init_steiner = False,
         reduce_init_idle = True, 
         stimtest = True, 
     )
@@ -105,7 +106,7 @@ import matplotlib as mpl
 
 mpl.rcParams["animation.embed_limit"] = 100  # MB
 Path("animation").mkdir(exist_ok=True)
-filename = f"animation/single_both_j12_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.html"
+filename = f"../../Output_Files/animation/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.html"
 
 anim = make_clean_routing_html_animation(
     g,

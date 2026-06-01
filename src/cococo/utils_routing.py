@@ -28,7 +28,7 @@ logger.handlers = [handler]
 
 pos = list[int, int] #! TODO should this be tuple[int, int]
 lock_penalty = 200
-max_idle_teleport = 5
+max_idle_teleport = 10
 
 
 class BasicRouter:
@@ -1502,9 +1502,9 @@ class TeleportationRouter(BasicRouter):
         # if there is no improvement possible at all, make sure you return a none best teleport
         if len(best_move_type_lst) == 0:
             best_teleport = None
-            logger.info("No Steiner improvement possible in this layer.")
+            logger.info("No Teleportation improvement possible in this layer.")
         else:
-            logger.info("Steiner found for this layer.")
+            logger.info("Teleportation found for this layer.")
 
         logger.info("Final Temperature T = %.6e", T)
 
@@ -1872,7 +1872,7 @@ class TeleportationRouter(BasicRouter):
             raise ValueError("`move_idle_type` must be `asap` or `later`")
 
         schedule = []
-        filename = f'schedule/schedule_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.pkl'  # logging filename
+        filename = f'../../Output_Files/schedule/schedule_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.pkl'  # logging filename
 
         available_gaps = []  # a list of gap positions which are free due to moves
         danger_qubits = (
@@ -2027,7 +2027,7 @@ class TeleportationRouter(BasicRouter):
 
 
             if len(steiner_dct) == 0 and len(idle_move_dct) == 0:
-                #print("steiner dct and idle move dct both empty")
+                logger.info("No Steiner and idle teleportation initialized")
                 best_steiner_init = None
                 best_idle_init = None
 
@@ -2058,8 +2058,8 @@ class TeleportationRouter(BasicRouter):
                 )
                 improvement_history.append((best_cost, cost_history[0]))
 
-            #print("best_steiner_init: ", best_steiner_init)
-            #print("best_idle_init: ", best_idle_init)
+            print("best_steiner_init: ", best_steiner_init)
+            print("best_idle_init: ", best_idle_init)
 
             # do not use a steiner if the SA could not find a good best_steiner. then it is set to none
             if not best_steiner_init and not best_idle_init:  # break earlier, similar to above
@@ -2087,8 +2087,8 @@ class TeleportationRouter(BasicRouter):
                     if len(best_steiner) + len(best_idle) < len(best_steiner_init) + len(best_idle_init):
                         logger.info("Complexity of teleportation could be reduced.")
                     best_schedule = best_schedule_temp.copy()
-                    #print("best steiner after reduce: ", best_steiner)
-                    #print("best idle after reduce: ", best_idle)
+                    print("best steiner after reduce: ", best_steiner)
+                    print("best idle after reduce: ", best_idle)
 
                 else:
                     best_steiner = best_steiner_init  # only rename

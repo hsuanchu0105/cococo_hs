@@ -11,49 +11,7 @@ import cococo.circuit_construction as circuit_construction
 import cococo.internal_testing as internal_testing
 import plotting
 
-def print_vdp_layers_with_qubit_labels(vdp_layers, layout):
-    """
-    Print vdp_layers layer by layer.
 
-    Converts gate keys from positions back to logical qubit labels using layout.
-
-    Args:
-        vdp_layers:
-            list of dictionaries, each dictionary maps gate -> path.
-            CNOT gate key: ((x1, y1), (x2, y2))
-            T gate key: (x, y)
-
-        layout:
-            dict like {qubit_label: position}
-    """
-    layout_rev = {pos: q for q, pos in layout.items()}
-
-    def gate_to_label(gate):
-        # CNOT gate: ((x1, y1), (x2, y2))
-        if isinstance(gate[0], tuple):
-            q1 = layout_rev.get(gate[0], gate[0])
-            q2 = layout_rev.get(gate[1], gate[1])
-            return (q1, q2)
-
-        # T gate / single-qubit gate: (x, y)
-        if isinstance(gate[0], int):
-            return layout_rev.get(gate, gate)
-
-        return gate
-
-    for layer_idx, layer in enumerate(vdp_layers):
-        print(f"\nLayer {layer_idx}")
-        print("-" * 40)
-
-        if not layer:
-            print("  empty layer")
-            continue
-
-        for gate, path in layer.items():
-            gate_label = gate_to_label(gate)
-            print(f"  gate {gate_label}:")
-            print(f"    position key = {gate}")
-            print(f"    path         = {path}")
 
 
 layout_type = "triple"
@@ -77,8 +35,8 @@ t=2
 
 q = len(data_qubit_locs)
 print("number of data qubits: ", q)
-j = 4
-num_gates = q*2
+j = 8
+num_gates = 80
 
 
 # j gates per layer on q qubits 
@@ -107,7 +65,7 @@ T_start = 100.0
 T_end = 0.1
 alpha = 0.95
 t=4 #mock value for cnot circuit
-radius = 10
+radius = 15
 k_lookahead = 5
 metric = "exact"
 
@@ -131,15 +89,28 @@ schedule, _ = router.optimize_layers(
         jump_harvesting = jump_harvesting,
         reduce_teleport = reduce_teleport,
         idle_move_type = idle_move_type,
-        include_steiner_teleport = True,
+        include_steiner_teleport = False,
         include_idle_teleport = True,
-        reduce_init_steiner = True,
+        reduce_init_steiner = False,
         reduce_init_idle = True, 
         stimtest = True, 
     )
 
 print("Len of schedule with teleport router: ", len(schedule))
 print("Reduction Delta: ", len(vdp_layers) - len(schedule))
+
+idle_cnt = 0
+steiner_cnt = 0
+for i in range(len(schedule)):
+    if(schedule[i]["steiner"]):
+        steiner_cnt += len(schedule[i]["steiner"])
+    if(schedule[i]["idle_teleport"]):
+        idle_cnt += len(schedule[i]["idle_teleport"])    
+    
+
+print("Number of Steiner teleportations: ", steiner_cnt)
+print("Number of idle teleportations: ", idle_cnt)
+
 
 from IPython.display import HTML
 from cococo.animation_routing_html import make_clean_routing_html_animation
@@ -148,7 +119,7 @@ import matplotlib as mpl
 
 mpl.rcParams["animation.embed_limit"] = 100  # MB
 Path("animation").mkdir(exist_ok=True)
-filename = f"animation/triple_both_j4_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.html"
+filename = f"../../Output_Files/animation/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.html"
 
 anim = make_clean_routing_html_animation(
     g,

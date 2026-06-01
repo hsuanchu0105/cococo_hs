@@ -13,9 +13,9 @@ import plotting
 
 
 
-layout_type = "single"
+layout_type = "hex"
 m = 4
-n = 24
+n = 4
 factories = []
 remove_edges = False
 g, data_qubit_locs, factory_ring = layouts.gen_layout_scalable(layout_type, m, n, factories, remove_edges)
@@ -29,7 +29,7 @@ t=2
 
 #print("factory ring: ", factory_ring)
 
-#plotting.plot_lattice_paths(g, {}, {}, layout, factories, size = (18,8))
+plotting.plot_lattice_paths(g, {}, {}, layout, factories, size = (18,8))
 
 
 q = len(data_qubit_locs)
