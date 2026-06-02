@@ -921,10 +921,15 @@ class TeleportationRouter(BasicRouter):
         
         #logical_positions = list(layout.values())
 
+        #print("vdp dict: ", vdp_dict)
 
         active_qubits = set()
         for key in vdp_dict:
             active_qubits.update(logical_qbts_in_vdp(key))
+
+        #print("vdp dict: ", vdp_dict.keys())
+
+    
 
         # only choose idle qubits which are active in future k layers
         if layers is not None and k_lookahead is not None:
@@ -932,7 +937,8 @@ class TeleportationRouter(BasicRouter):
             terminals = []
             for layer in layers_temp:
                 terminals += layer
-            qubits_k_lookahead = [t for outer in terminals for t in outer]
+            qubits_k_lookahead = set([t for outer in terminals for t in outer])
+            #print("qubits used in next k layers: ", qubits_k_lookahead)
             idle_qubits = [
                 q for q in self.logical_pos
                 if q not in active_qubits and q in qubits_k_lookahead
@@ -943,11 +949,14 @@ class TeleportationRouter(BasicRouter):
                 if q not in active_qubits
             ]
 
+        #print("idle qubits:", idle_qubits)
         random.shuffle(idle_qubits)
 
         if max_idle_moves is not None:
             idle_qubits = idle_qubits[:max_idle_moves]
 
+
+        #print("idle qubits (max):", idle_qubits)
         occupied = set()
         occupied.update(occupied_ancillas_from_vdp(vdp_dict))
         occupied.update(occupied_nodes_from_steiner(steiner_dct)) 
@@ -973,12 +982,14 @@ class TeleportationRouter(BasicRouter):
                     g_temp.remove_node(pos)
 
             if q not in g_temp.nodes:
+                #print("skip idle qubit ", q)
                 continue
 
             reachable = list(nx.single_source_shortest_path_length(g_temp, q).keys())
             reachable = [node for node in reachable if node != q] # exclude q 
 
             if not reachable:
+                #print("No reachable qubits from ", q)
                 continue
             
 
@@ -986,7 +997,7 @@ class TeleportationRouter(BasicRouter):
             path_idle = nx.dijkstra_path(g_temp, q, terminal)
 
             idle_move_dct[("idle", q, terminal)] = (path_idle, None)
-
+            
             # Prevent other idle moves from overlapping this one.
             used_idle_paths.update(path_idle)
 
@@ -1847,6 +1858,7 @@ class TeleportationRouter(BasicRouter):
         jump_harvesting: str,
         reduce_teleport: bool,
         idle_move_type: str,
+        filename: str,
         include_steiner_teleport: bool = True,
         include_idle_teleport: bool= False,
         reduce_init_steiner: bool = False,
@@ -1874,7 +1886,7 @@ class TeleportationRouter(BasicRouter):
             raise ValueError("`move_idle_type` must be `asap` or `later`")
 
         schedule = []
-        filename = f'../../Output_Files/schedule/schedule_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.pkl'  # logging filename
+        
 
         available_gaps = []  # a list of gap positions which are free due to moves
         danger_qubits = (
@@ -2025,7 +2037,7 @@ class TeleportationRouter(BasicRouter):
                     idle_move_dct = self.initialize_idle_moves(
                         vdp_dict, steiner_dct, max_idle_teleport, layers = layers_idle, k_lookahead = k_idle
                     )
-                    #print("idle_move_dct: ", idle_move_dct)
+                    print("idle_move_dct: ", idle_move_dct)
 
 
             if len(steiner_dct) == 0 and len(idle_move_dct) == 0:

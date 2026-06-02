@@ -11,7 +11,7 @@ import cococo.circuit_construction as circuit_construction
 import cococo.internal_testing as internal_testing
 import plotting
 
-
+from datetime import datetime
 
 
 layout_type = "triple"
@@ -77,6 +77,8 @@ stimtest = True
 reduce_teleport = True
 idle_move_type = "later"
 
+filename = f'../../Output_Files/schedule/schedule_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.pkl'
+
 schedule, _ = router.optimize_layers(        
         terminal_pairs,
         layout,
@@ -91,6 +93,7 @@ schedule, _ = router.optimize_layers(
         jump_harvesting = jump_harvesting,
         reduce_teleport = reduce_teleport,
         idle_move_type = idle_move_type,
+        filename = filename,
         include_steiner_teleport = False,
         include_idle_teleport = True,
         reduce_init_steiner = False,
