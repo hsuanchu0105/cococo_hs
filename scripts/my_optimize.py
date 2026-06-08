@@ -13,6 +13,7 @@ import plotting
 
 from datetime import datetime
 
+seed = 45
 
 layout_type = "triple"
 m = 4
@@ -41,7 +42,7 @@ num_gates = 80
 
 # j gates per layer on q qubits 
 # pairs indicate the qubit index (0, ..., q)
-dag, pairs = circuit_construction.create_random_sequential_circuit_dag(j, q, num_gates, ) # at least num_gates gates
+dag, pairs = circuit_construction.create_random_sequential_circuit_dag(j, q, num_gates, seed) # at least num_gates gates
 #print("pairs: ", pairs)
 print("number of gates: ", len(pairs))
 

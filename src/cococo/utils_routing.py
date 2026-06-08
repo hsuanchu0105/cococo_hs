@@ -989,7 +989,7 @@ class TeleportationRouter(BasicRouter):
             reachable = [node for node in reachable if node != q] # exclude q 
 
             if not reachable:
-                #print("No reachable qubits from ", q)
+                #print("Initializing idle step - No reachable qubits from ", q)
                 continue
             
 
@@ -2037,7 +2037,7 @@ class TeleportationRouter(BasicRouter):
                     idle_move_dct = self.initialize_idle_moves(
                         vdp_dict, steiner_dct, max_idle_teleport, layers = layers_idle, k_lookahead = k_idle
                     )
-                    print("idle_move_dct: ", idle_move_dct)
+                    #print("idle_move_dct: ", idle_move_dct)
 
 
             if len(steiner_dct) == 0 and len(idle_move_dct) == 0:

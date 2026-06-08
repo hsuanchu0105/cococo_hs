@@ -8,15 +8,17 @@ from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.circuit.library import TGate, CXGate
 from qiskit.dagcircuit import DAGCircuit
 
-random.seed(45)
 
 
-def create_random_sequential_circuit_dag(j: int, q: int, num_gates: int):
+
+def create_random_sequential_circuit_dag(j: int, q: int, num_gates: int, seed: int | None = None):
     """
     Creates a sequential circuit with j gates per layer on q qubits with at least num_gates in total.
 
     takes layers from perspective of DAG into account
     """
+
+    rng = random.Random(seed)
     dag = DAGCircuit()
     qreg = QuantumRegister(q, "q")
     dag.add_qreg(qreg) # add all wires in a quantum register
@@ -38,11 +40,11 @@ def create_random_sequential_circuit_dag(j: int, q: int, num_gates: int):
         # sample control and target randomly
         flat = [x for pair in layer_int_temp for x in pair]
         while True:
-            c = random.randint(0, q - 1)
+            c = rng.randint(0, q - 1)
             if c not in flat:
                 break
         while True:
-            t = random.randint(0, q - 1)
+            t = rng.randint(0, q - 1)
             if c != t and t not in flat:
                 break
         layer_int_temp.append((c, t))
@@ -55,7 +57,7 @@ def create_random_sequential_circuit_dag(j: int, q: int, num_gates: int):
     temp_reuse = []
     temp_noreuse = []
     for pair in layer_int_temp:
-        chosen = random.choice(pair)
+        chosen = rng.choice(pair)
         temp_reuse.append(chosen)
         other = pair[0] if chosen == pair[1] else pair[1]
         temp_noreuse.append(other)
@@ -72,13 +74,13 @@ def create_random_sequential_circuit_dag(j: int, q: int, num_gates: int):
                 x for pair in layer_int_temp for x in pair
             ]  # make sure that qubits are not reused in the same layer
             while True:
-                qubit2 = random.randint(0, q - 1)
+                qubit2 = rng.randint(0, q - 1)
                 if qubit != qubit2 and qubit2 not in flat and qubit2 in temp_noreuse:
                     break
             temp_reuse_second.append(qubit2)
             temp_noreuse_second.append(qubit)
             temp_lst = [qubit, qubit2]
-            random.shuffle(temp_lst)
+            rng.shuffle(temp_lst)
             # print("temp lst", temp_lst)
             layer_int_temp.append((temp_lst[0], temp_lst[1]))
             dag.apply_operation_back(
@@ -93,7 +95,7 @@ def create_random_sequential_circuit_dag(j: int, q: int, num_gates: int):
 
 
 def generate_max_parallel_circuit(
-    q: int, min_depth: int
+    q: int, min_depth: int, seed: int | None = None
 ) -> list[
     tuple[int, int] | int
 ]:  # actually only tuples but mypy needs the int elements too
@@ -103,11 +105,12 @@ def generate_max_parallel_circuit(
     To make it less arbitrary, you should choose min depth to be a multiple of q, i.e. s*q, s.t. you get 2s layers
     Otherwise, the last layer might be a bit empty.
     """
+    rng = random.Random(seed)
     gates_counter = 0
     circuit: list[tuple[int, int] | int] = []
     labels = list(range(q))
     while gates_counter <= min_depth:
-        random.shuffle(labels)
+        rng.shuffle(labels)
         tuples = [(labels[i], labels[i + 1]) for i in range(0, len(labels), 2)]
         gates_counter += len(tuples)
         circuit += tuples
@@ -118,7 +121,7 @@ def generate_max_parallel_circuit(
 
 
 def generate_min_parallel_circuit(
-    q: int, min_depth: int, layer_size: int
+    q: int, min_depth: int, layer_size: int, seed: int | None = None
 ) -> list[tuple[int, int] | int]:  # same as above
     """Circuits which have nearly no parallelism at all.
 
@@ -127,15 +130,16 @@ def generate_min_parallel_circuit(
     NO parallelism at all and then, the hc and routing would trivially have no benefit and no parallelism.
     Hence, choose a layer_size, maybe 2 or 3 which ensures that there are max. 2 or 3 gates per layer until a qubit is shared again.
     """
+    rng = random.Random(seed)
     num_layers = min_depth // layer_size
     lst = []
     all_labels_used = set()  # Track which labels have been used
 
     # first layer
     labels = list(range(q))
-    random.shuffle(labels)
+    rng.shuffle(labels)
     tuples = [(labels[i], labels[i + 1]) for i in range(0, len(labels), 2)]
-    first_layer = random.sample(tuples, layer_size)
+    first_layer = rng.sample(tuples, layer_size)
     lst.append(first_layer)
 
     all_labels_used.update([label for tup in first_layer for label in tup])
@@ -144,18 +148,18 @@ def generate_min_parallel_circuit(
     while len(all_labels_used) < q or len(lst) < num_layers:
         temp = []
         flattened_labels = [label for tup in lst[-1] for label in tup]
-        k = random.choice(  # noqa: S311
+        k = rng.choice(  # noqa: S311
             flattened_labels
         )  # this qubit will be used in current layer too to destroy parallelism
         labels_copy = labels.copy()
         labels_copy.remove(k)
-        l = random.choice(labels_copy)  # form pair with l and k  # noqa: E741, S311
+        l = rng.choice(labels_copy)  # form pair with l and k  # noqa: E741, S311
         temp.append((l, k))
         labels_copy.remove(l)
 
         # fill up layer, avoid duplicates
         while len(temp) < layer_size:
-            random_tuple = random.choice(
+            random_tuple = rng.choice(
                 [
                     (labels_copy[i], labels_copy[i + 1])
                     for i in range(0, len(labels_copy), 2)
@@ -183,7 +187,7 @@ def generate_min_parallel_circuit(
 
 
 def generate_random_circuit(
-    q: int, min_depth: int, tgate: bool = False, ratio: float = 0.5
+    q: int, min_depth: int, tgate: bool = False, ratio: float = 0.5, seed: int | None = None
 ) -> list[tuple[int, int] | int]:
     """Random CNOT Pairs. Optional: random T gates.
 
@@ -214,6 +218,8 @@ def generate_random_circuit(
         msg = "q must be at least 2 to form pairs."
         raise ValueError(msg)
 
+    rng = random.Random(seed)
+
     # predetermine the desired number of t gates and cnots
     num_cnot_gates = round(min_depth * ratio) if tgate else min_depth
     num_t_gates = min_depth - num_cnot_gates
@@ -224,16 +230,16 @@ def generate_random_circuit(
 
     # Ensure each qubit is used at least once
     available_qubits = list(range(q))
-    random.shuffle(available_qubits)
+    rng.shuffle(available_qubits)
 
     while len(cnot_pairs) <= num_cnot_gates:
-        a, b = random.sample(range(q), 2)
+        a, b = rng.sample(range(q), 2)
         cnot_pairs.append((a, b))
         used_qubits.update([a, b])
 
     if tgate is True:
         while len(t_gates) <= num_t_gates:
-            a = random.randrange(q)  # noqa: S311
+            a = rng.randrange(q)  # noqa: S311
             t_gates.append(a)
             used_qubits.add(a)
 
@@ -252,9 +258,9 @@ def generate_random_circuit(
             t_gates.append(i)  # Prioritize adding T gate
             extra_t_count += 1
         else:
-            b = random.choice(range(q))  # Pick a random second qubit  # noqa: S311
+            b = rng.choice(range(q))  # Pick a random second qubit  # noqa: S311
             while b == i:  # Ensure b is different from i
-                b = random.choice(range(q))  # noqa: S311
+                b = rng.choice(range(q))  # noqa: S311
             cnot_pairs.append((i, b))
             extra_cnot_count += 1
 
@@ -265,6 +271,6 @@ def generate_random_circuit(
     assert (
         abs(ratio - final_ratio) < 0.07
     ), "The final ratio deviates more than 0.05 from desired ratio= cnot/total gates"
-    random.shuffle(circuit)
+    rng.shuffle(circuit)
 
     return circuit
