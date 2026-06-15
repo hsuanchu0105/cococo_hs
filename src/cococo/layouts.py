@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import random
+#import random
 
 import networkx as nx
 import itertools
 
-random.seed(45)
+#random.seed(45)
 
 
 def translate_layout_circuit(

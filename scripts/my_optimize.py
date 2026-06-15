@@ -31,7 +31,7 @@ t=2
 
 #print("factory ring: ", factory_ring)
 
-#plotting.plot_lattice_paths(g, {}, {}, layout, factories, size = (18,8))
+plotting.plot_lattice_paths(g, {}, {}, layout, factories, size = (18,8))
 
 
 q = len(data_qubit_locs)
@@ -95,9 +95,9 @@ schedule, _ = router.optimize_layers(
         reduce_teleport = reduce_teleport,
         idle_move_type = idle_move_type,
         filename = filename,
-        include_steiner_teleport = False,
+        include_steiner_teleport = True,
         include_idle_teleport = True,
-        reduce_init_steiner = False,
+        reduce_init_steiner = True,
         reduce_init_idle = True, 
         stimtest = True, 
     )
