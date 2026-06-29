@@ -7,6 +7,7 @@ sys.path.insert(0, str(project_root / "src"))
 
 import cococo.layouts as layouts
 import cococo.utils_routing as utils
+#import cococo.SA_mod as utils
 import cococo.circuit_construction as circuit_construction
 import cococo.internal_testing as internal_testing
 import plotting
@@ -15,29 +16,23 @@ from datetime import datetime
 
 seed = 45
 
-layout_type = "triple"
+layout_type = "single"
 m = 4
-n = 4
+n = 8
 factories = []
 remove_edges = False
 g, data_qubit_locs, factory_ring = layouts.gen_layout_scalable(layout_type, m, n, factories, remove_edges)
 layout = {i: j for i,j in enumerate(data_qubit_locs)}
 t=2
 
-#print("layout: ", layout)
 
-#print(g)
-#print("data qubit location", data_qubit_locs)
-
-#print("factory ring: ", factory_ring)
-
-plotting.plot_lattice_paths(g, {}, {}, layout, factories, size = (18,8))
+#plotting.plot_lattice_paths(g, {}, {}, layout, factories, size = (18,8))
 
 
 q = len(data_qubit_locs)
 print("number of data qubits: ", q)
 j = 8
-num_gates = 80
+num_gates = 2 * q
 
 
 # j gates per layer on q qubits 
@@ -75,7 +70,7 @@ steiner_init_type = "full_random"
 jump_harvesting = True
 stimtest = True
 
-reduce_teleport = True
+reduce_teleport = False
 idle_move_type = "later"
 
 filename = f'../../Output_Files/schedule/schedule_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.pkl'
@@ -95,9 +90,9 @@ schedule, _ = router.optimize_layers(
         reduce_teleport = reduce_teleport,
         idle_move_type = idle_move_type,
         filename = filename,
-        include_steiner_teleport = True,
+        include_steiner_teleport = False,
         include_idle_teleport = True,
-        reduce_init_steiner = True,
+        reduce_init_steiner = False,
         reduce_init_idle = True, 
         stimtest = True, 
     )
