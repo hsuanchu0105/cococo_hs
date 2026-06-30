@@ -1,0 +1,546 @@
+from dataclasses import dataclass
+from typing import Literal
+from collections import defaultdict
+import itertools
+import networkx as nx
+from dataclasses import replace
+import random
+import numpy as np
+
+
+
+pos = tuple[int, int]
+Gate = tuple[pos, pos]
+
+FirstPart = Literal["control", "target"]
+
+
+@dataclass(frozen=True)
+class RouteInfo:
+    gate: Gate
+    path: tuple[pos, ...]
+    ancilla_idx: int
+    first_part: FirstPart = "control"
+
+    @property
+    def ancilla(self) -> pos:
+        return self.path[self.ancilla_idx]
+
+    @property
+    def control(self) -> tuple[pos, ...]:
+        return self.path[: self.ancilla_idx + 1]
+
+    @property
+    def target(self) -> tuple[pos, ...]:
+        return self.path[self.ancilla_idx :]
+
+    @property
+    def subpath1(self) -> tuple[pos, ...]:
+        """The part routed first."""
+        if self.first_part == "control":
+            return self.control
+        return self.target
+
+    @property
+    def subpath2(self) -> tuple[pos, ...]:
+        """The part routed second."""
+        if self.first_part == "control":
+            return self.target
+        return self.control
+        
+class BasicRouter:
+    
+
+    def __init__(
+        self,
+        g: nx.Graph,
+        logical_pos: list[pos],
+        factory_pos: list[pos],
+        valid_path: str,
+        t: int,
+        metric: str,
+        use_dag: bool,
+    ):
+        """Class for shortest-first routing based compilation.
+
+        Args:
+            g (nx.Graph): Macroscopic Routing Graph. Created via mqt.cococo.layouts
+            logical_pos (list[pos]): Logical positions on the graph. Also from mqt.cococo.layouts
+            factory_pos (list[pos]): Positions of the factories. Also from mqt.cococo.layouts
+            valid_path (str): Either "cc" or "sc" for color code and surface code. However, revisit usefulness of "sc".
+            t (int): Reset time for the factories
+            metric (str): Either "exact" or "crossing", but it is recommended to use "exact"
+            use_dag (bool, optional): Determins whether DAG structure from qiskit is used or naive sequential layering. It is recommended to use `True`.
+        """
+        self.g = g
+        self.logical_pos = logical_pos
+        self.factory_pos = factory_pos
+        if valid_path not in {"cc", "sc"}:
+            raise NotImplementedError(
+                "Other valid path setups are not implemented yet."
+            )
+        self.valid_path = valid_path
+        self.use_dag = use_dag
+        self.t = t
+
+        self.factory_times = {}
+        for factory in factory_pos:
+            self.factory_times.update({factory: t})
+
+        self.logical_pos_temp = None
+
+        self.metric = metric
+        if metric not in {"crossing", "exact"}:
+            raise NotImplementedError(
+                "Other metrics than crossing and exact not implemented yet."
+            )
+        self.routes_by_layer: dict[int, dict[Gate, RouteInfo]]
+        self.overlap_graphs: dict[int, nx.Graph]
+        self.node_to_gates_by_layer: dict[int, dict[pos, set[Gate]]] = defaultdict(
+            lambda: defaultdict(set)
+        )
+
+    def make_route_info(
+        self,
+        gate: Gate,
+        path: list[pos],
+        ancilla_idx: int | None,
+        first_part: FirstPart = "control" | None,
+    ) -> RouteInfo:
+        return RouteInfo(
+            gate=gate,
+            path=tuple(path),
+            ancilla_idx=ancilla_idx,
+            first_part=first_part,
+        )
+
+
+    def build_overlap_graph(
+        self,
+        #layer_idx: int,
+        routes,
+        *,
+        include_endpoints: bool = True,
+        overlap_type: str = "strict2",
+    ) -> nx.Graph:
+        """
+        Build overlap graph for routes.
+
+        Nodes of the overlap graph are gates.
+        Edge between two gates means their selected path parts overlap.
+
+        """
+
+        #layer_routes = self.routes_by_layer.get(layer_idx, {})
+        layer_routes = routes
+
+        overlap_graph = nx.Graph()
+
+        for gate, info in layer_routes.items():
+            overlap_graph.add_node(gate, route_info=info)
+
+        def nodes_of(info: RouteInfo) -> set[pos]:
+    
+            if include_endpoints:
+                    nodes = info.path
+            else:
+                nodes = info.path[1:-1]
+
+            return set(nodes)
+
+        node_to_gates: dict[pos, list[Gate]] = defaultdict(list)
+
+            # {node: list of gates using this node}
+        for gate, Routeinfo in layer_routes.items():
+            for node in nodes_of(Routeinfo):
+                node_to_gates[node].append(gate)
+            
+            # {gate pair: set of overlap nodes}
+        pair_to_overlap_nodes: dict[tuple[Gate, Gate], set[pos]] = defaultdict(set)
+
+        for node, gates in node_to_gates.items():
+            if len(gates) <= 1:
+                continue
+
+            for g1, g2 in itertools.combinations(gates, 2):
+                pair = tuple(sorted((g1, g2), key=str)) # if contains other type of key 
+                pair_to_overlap_nodes[pair].add(node)
+
+        for (g1, g2), overlap_nodes in pair_to_overlap_nodes.items():
+            overlap_graph.add_edge(
+                g1,
+                g2,
+                overlap_nodes=overlap_nodes,
+                num_overlap=len(overlap_nodes),
+            )
+            
+        return overlap_graph
+
+
+    def update_overlap_graph(
+        self,
+        layer_idx: int,
+        route_info: RouteInfo,
+        *,
+        include_endpoints: bool = True,
+    ) -> None:
+        """
+        Add a route that is already known to be valid.
+        """
+
+        gate = route_info.gate
+        G = self.overlap_graphs[layer_idx]
+        node_to_gates = self.node_to_gates_by_layer[layer_idx]
+
+        # Store route.
+        self.routes_by_layer[layer_idx][gate] = route_info
+
+        # Add node to overlap graph.
+        G.add_node(gate, route_info=route_info)
+
+        candidate_nodes = self.route_nodes(
+            route_info,
+            include_endpoints=include_endpoints,
+        )
+
+        for node in candidate_nodes:
+                # existing gates using this node 
+            existing_gates = node_to_gates[node]
+
+            for other_gate in existing_gates:
+                if other_gate == gate:
+                    continue
+
+                if G.has_edge(gate, other_gate):
+                    G[gate][other_gate]["overlap_nodes"].add(node)
+                    G[gate][other_gate]["num_overlap"] = len(
+                        G[gate][other_gate]["overlap_nodes"]
+                    )
+                else:
+                    G.add_edge(
+                        gate,
+                        other_gate,
+                        overlap_nodes={node},
+                        num_overlap=1,
+                    )
+
+            existing_gates.add(gate)
+
+
+    # helper function
+    def route_nodes(
+        self,
+        route_info: RouteInfo,
+        *,
+        include_endpoints: bool = True,
+    ) -> set[pos]:
+        if include_endpoints:
+            return set(route_info.path)
+
+        return set(route_info.path[1:-1])
+
+    def candidate_direct_overlaps(
+        self,
+        layer_idx: int,
+        route_info: RouteInfo,
+        *,
+        include_endpoints: bool = True,
+    ) -> dict[Gate, set[pos]]:
+        """
+        Check which existing routes in this layer directly overlap
+        with the candidate route.
+
+        Does not modify self.overlap_graphs.
+        """
+
+        node_to_gates = self.node_to_gates_by_layer[layer_idx]
+        candidate_nodes = self.route_nodes(
+            route_info,
+            include_endpoints=include_endpoints,
+        )
+
+        overlaps: dict[Gate, set[pos]] = defaultdict(set)
+
+        for node in candidate_nodes:
+            for other_gate in node_to_gates.get(node, set()):
+                if other_gate == route_info.gate:
+                    continue
+
+                overlaps[other_gate].add(node)
+
+        return dict(overlaps)
+        
+    def get_local_overlap_graph(
+        self,
+        layer_idx: int,
+        route_info: RouteInfo,
+        *,
+        include_endpoints: bool = True,
+    ) -> nx.Graph:
+        """
+        Build the local overlap graph containing the candidate route.
+
+        This is a virtual graph. It does not modify self.overlap_graphs.
+        """
+
+        G = self.overlap_graphs[layer_idx]
+
+        direct_overlaps = self.candidate_direct_overlaps(
+            layer_idx,
+            route_info,
+            include_endpoints=include_endpoints,
+        )
+
+        candidate_gate = route_info.gate
+
+        # If no direct overlaps, it is valid anyway
+        if not direct_overlaps:
+            H = nx.Graph()
+            H.add_node(candidate_gate, route_info=route_info, is_candidate=True)
+            return H
+
+        # Collect existing connected components touched by this candidate.
+        affected_gates: set[Gate] = set()
+
+        for other_gate in direct_overlaps:
+            if G.has_node(other_gate):
+                affected_gates.update(nx.node_connected_component(G, other_gate))
+            else:
+                affected_gates.add(other_gate)
+
+        # Copy only affected part.
+        H = G.subgraph(affected_gates).copy()
+
+        # Add candidate.
+        H.add_node(candidate_gate, route_info=route_info, is_candidate=True)
+
+        # Add candidate overlap edges.
+        for other_gate, overlap_nodes in direct_overlaps.items():
+            H.add_edge(
+                candidate_gate,
+                other_gate,
+                overlap_nodes=set(overlap_nodes),
+                num_overlap=len(overlap_nodes),
+                is_candidate_edge=True,
+            )
+
+        return H
+
+
+    def check_validity(
+        self,
+        new_info: RouteInfo,
+        path_ov_info: RouteInfo,
+        allowed_overlap: str = "strict2",
+    ) -> tuple[bool, RouteInfo | None, RouteInfo | None, str]:
+        """
+        Check whether a new route candidate is valid against one existing overlapping route.
+
+        Returns:
+            valid:
+                Whether the pair is valid.
+
+            updated_new_info:
+                Updated RouteInfo for the new route, with chosen ancilla_idx and first_part.
+
+            updated_path_ov_info:
+                Updated RouteInfo for the existing overlapping route.
+
+            reason:
+                Explanation for debugging.
+        """
+
+        new_path = list(new_info.path)
+        path_ov = list(path_ov_info.path)
+
+        # --------------------------------------------------
+        # 1. Record overlap positions along new_path
+        # --------------------------------------------------
+        overlap_rec = np.zeros(len(new_path), dtype=int)
+
+        for i, node in enumerate(new_path):
+            if node in path_ov:
+                overlap_rec[i] = 1
+
+        overlap_indices = np.nonzero(overlap_rec)[0]
+
+        if len(overlap_indices) == 0:
+            # No overlap, so this pair is automatically valid.
+            return True, new_info, path_ov_info, "No overlap."
+
+        # --------------------------------------------------
+        # 2. Check whether overlap is in one consecutive block
+        # --------------------------------------------------
+        starts = np.where((overlap_rec == 1) & np.r_[True, overlap_rec[:-1] == 0])[0]
+
+        if len(starts) >= 2:
+            return (
+                False,
+                None,
+                None,
+                "Two paths overlap in multiple disconnected places.",
+            )
+
+        ov_start = overlap_indices[0]
+        ov_end = overlap_indices[-1]
+
+        # --------------------------------------------------
+        # 3. Find corresponding overlap interval in path_ov
+        # --------------------------------------------------
+        try:
+            ov_st2 = path_ov.index(new_path[ov_start])
+            ov_end2 = path_ov.index(new_path[ov_end])
+        except ValueError:
+            return (
+                False,
+                None,
+                None,
+                "Overlap node was not found in path_ov. This should not happen.",
+            )
+
+        if ov_st2 > ov_end2:
+            ov_st2, ov_end2 = ov_end2, ov_st2
+
+        # --------------------------------------------------
+        # 4. Count available space on both sides
+        # --------------------------------------------------
+        # left side: before overlap
+        d11 = ov_start
+        d21 = ov_st2
+
+        # right side: after overlap
+        # Important: this excludes the overlap endpoint itself.
+        d12 = len(new_path) - 1 - ov_end
+        d22 = len(path_ov) - 1 - ov_end2
+
+        # A side is usable if there is at least one internal node
+        # where we can place the ancilla.
+        new_left_ok = d11 >= 2
+        new_right_ok = d12 >= 2
+        old_left_ok = d21 >= 2
+        old_right_ok = d22 >= 2
+
+        # --------------------------------------------------
+        # 5. Choose which side to place the two ancillas
+        # --------------------------------------------------
+        # same-side case:
+        #   new left + old left
+        #   new right + old right
+        #
+        # opposite-side case:
+        #   new left + old right
+        #   new right + old left
+
+        chosen_case = None
+
+        if new_left_ok and old_left_ok:
+            chosen_case = ("left", "left")
+
+        elif new_right_ok and old_right_ok:
+            chosen_case = ("right", "right")
+
+        elif new_left_ok and old_right_ok:
+            chosen_case = ("left", "right")
+
+        elif new_right_ok and old_left_ok:
+            chosen_case = ("right", "left")
+
+        else:
+            return (
+                False,
+                None,
+                None,
+                (
+                    "No valid ancilla placement. "
+                    f"d11={d11}, d12={d12}, d21={d21}, d22={d22}"
+                ),
+            )
+
+        new_side, old_side = chosen_case
+
+        # --------------------------------------------------
+        # 6. Randomly choose valid ancilla positions
+        # --------------------------------------------------
+        if new_side == "left":
+            a1 = random.randint(1, ov_start - 1)
+            new_first_part: FirstPart = "control"
+        else:
+            a1 = random.randint(ov_end + 1, len(new_path) - 2)
+            new_first_part = "target"
+
+        if old_side == "left":
+            a2 = random.randint(1, ov_st2 - 1)
+            old_first_part: FirstPart = "control"
+        else:
+            a2 = random.randint(ov_end2 + 1, len(path_ov) - 2)
+            old_first_part = "target"
+
+        # --------------------------------------------------
+        # 7. Return updated RouteInfo objects
+        # --------------------------------------------------
+        updated_new_info = replace(
+            new_info,
+            ancilla_idx=a1,
+            first_part=new_first_part,
+        )
+
+        updated_path_ov_info = replace(
+            path_ov_info,
+            ancilla_idx=a2,
+            first_part=old_first_part,
+        )
+
+        reason = (
+            f"Valid strict2 pair. "
+            f"overlap new_path[{ov_start}:{ov_end}], "
+            f"path_ov[{ov_st2}:{ov_end2}], "
+            f"chosen sides={chosen_case}, "
+            f"a1={a1}, a2={a2}."
+        )
+
+        return True, updated_new_info, updated_path_ov_info, reason
+
+
+    def find_fine_grained_vdp(self,
+            layer_idx: int,
+            layer: list[tuple[pos, pos] | pos],
+            logical_pos: None | list[pos],
+            factory_times: dict[pos, int],
+            overlap_type:str,
+        ):
+            
+        paths_current_layer = [] 
+        
+        for g in gates:
+            path = find shortest path from g[0] to g[1]
+            # check overlap with all routed paths in this layer 
+            if paths_current_layer:
+                route_info = make_route_info(g, path, None, None)
+                local_og = self.get_local_overlap_graph(layer_idx, route_info)
+                
+                if overlap_type == "strict2":
+                    if local_og.number_of_nodes() >= 3:
+                        valid = False
+                    
+                    elif local_og.number_of_nodes() == 1:
+                        valid = True
+                    
+                    else:
+                        # exactly 2 nodes: candidate + one old route
+                        old_gates = [g for g in local_og.nodes if g != route_info.gate]
+                        old_gate = old_gates[0]
+                    
+                        path_ov_info = local_og.nodes[old_gate]["route_info"]
+                    
+                        valid, updated_new, updated_old, reason = self.check_validity(
+                            route_info,
+                            path_ov_info,
+                            allow_overlap="strict2",
+                        )
+                        self.update_overlap_graph
+                    
+                else:
+                    # find alternative route 
+                    g_temp = ...
+            else:
+                paths_current_layer.append(path)

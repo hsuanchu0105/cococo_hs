@@ -428,7 +428,7 @@ class BasicRouter:
 
         return vdp_dict, terminal_pairs_remainder, factory_times_temp
     
-    def check_overlap(self, paths_cur_lay, new_path):
+    def check_overlap(self, paths_cur_lay: dict, new_path: list):
         # return number of overlap with other paths 
         ov_num = 0
         ov_keys = []
