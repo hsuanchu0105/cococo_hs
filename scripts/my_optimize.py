@@ -114,7 +114,7 @@ print("Number of idle teleportations: ", idle_cnt)
 
 
 from IPython.display import HTML
-from cococo.animation_routing_html import make_clean_routing_html_animation
+from cococo.animations import make_clean_routing_html_animation
 from datetime import datetime
 import matplotlib as mpl 
 
