@@ -48,14 +48,12 @@ terminal_pairs = layouts.translate_layout_circuit(pairs, layout) #let's stick to
 router = utils.BasicRouter(g, data_qubit_locs, factories, valid_path = "cc", t=t, metric = "exact", use_dag = True)
 # each layer has disjoint logical support, however it doesn't guarantee that all those gates can be physically routed at the same time on the lattice
 layers = router.split_layer_terminal_pairs(terminal_pairs)
-paths = router.find_fine_grained_vdp(layers[0], 0, None, None)
+paths = router.find_fine_grained_vdp(0, layers[0], None, None, "strict2")
 
-for key, route in router.routes.items():
-    print("gate: ", key[1])
-    print("path : ", route["path"], "\n")
-    print("ancilla : ", route["ancilla"], "\n")
-    print("subpath1 : ", route["subpath1"], "\n")
-    print("subpath2 : ", route["subpath2"], "\n")
-#print(paths)
 
-plot_fine_routes(g, router.routes, layer_idx=0)
+
+print(router.overlap_graphs)
+print(router.routes_by_layer)
+
+
+plot_fine_routes(g, router.routes_by_layer)

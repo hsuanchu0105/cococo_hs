@@ -740,211 +740,299 @@ def make_clean_routing_html_animation(
 
     return anim
 
-def plot_fine_routes(
-        graph,
-        routes,
-        layer_idx: int | None = None,
-        *,
-        ax=None,
-        show: bool = True,
-        save_path: str | None = None,
-        show_gate_label: bool = False,
-    ):
-        """
-        Plot all stored routes, or only routes from one layer.
 
-        Green: subpath1
-        Blue: subpath2
-        Orange dot: ancilla position
+pos = tuple[int, int]
+Gate = tuple[pos, pos]
+@dataclass(frozen=True)
+class RouteInfo:
+    gate: Gate
+    path: tuple[pos, ...]
+    ancilla_idx: int
+    first_part: FirstPart = "control"
 
+    @property
+    def ancilla(self) -> pos:
+        return self.path[self.ancilla_idx]
+
+    @property
+    def control(self) -> tuple[pos, ...]:
+        return self.path[: self.ancilla_idx + 1]
+
+    @property
+    def target(self) -> tuple[pos, ...]:
+        return self.path[self.ancilla_idx :]
+
+    @property
+    def subpath1(self) -> tuple[pos, ...]:
+        """The part routed first."""
+        if self.first_part == "control":
+            return self.control
+        return self.target
+
+    @property
+    def subpath2(self) -> tuple[pos, ...]:
+        """The part routed second."""
+        if self.first_part == "control":
+            return self.target
+        return self.control
     
+
+def plot_fine_routes(
+    graph: nx.Graph,
+    routes_by_layer: dict[int, dict[Gate, RouteInfo]],
+    layer_idx: int | None = None,
+    *,
+    ax=None,
+    show: bool = True,
+    save_path: str | None = None,
+    show_gate_label: bool = False,
+    show_route_label: bool = False,
+):
+    """
+    Plot fine-grained routes stored as:
+
+        routes_by_layer[layer_idx][gate] = RouteInfo(...)
+
+    Green solid line:
+        route_info.subpath1, the part routed first
+
+    Blue dashed line:
+        route_info.subpath2, the part routed second
+
+    Orange dot:
+        route_info.ancilla
+    """
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 8))
+    else:
+        fig = ax.figure
+
+    # --------------------------------------------------
+    # 1. Node positions
+    # --------------------------------------------------
+    graph_pos = nx.get_node_attributes(graph, "pos")
+
+    if not graph_pos:
+        graph_pos = {node: node for node in graph.nodes}
+
+    def xy(node: pos) -> tuple[float, float]:
+        p = graph_pos.get(node, node)
+        return p[0], p[1]
+
+    # --------------------------------------------------
+    # 2. Drawing helpers
+    # --------------------------------------------------
+    used_labels: set[str] = set()
+
+    def label_once(label: str) -> str | None:
+        if label in used_labels:
+            return None
+        used_labels.add(label)
+        return label
+
+    def draw_path(
+        path: tuple[pos, ...],
+        *,
+        color: str,
+        label: str,
+        linewidth: float = 3.0,
+        linestyle: str = "-",
+        zorder: int = 3,
+    ) -> None:
+        if path is None or len(path) == 0:
+            return
+
+        for u, v in zip(path[:-1], path[1:]):
+            x1, y1 = xy(u)
+            x2, y2 = xy(v)
+
+            ax.plot(
+                [x1, x2],
+                [y1, y2],
+                color=color,
+                linewidth=linewidth,
+                linestyle=linestyle,
+                solid_capstyle="round",
+                zorder=zorder,
+                label=label_once(label),
+            )
+
+        xs, ys = zip(*(xy(node) for node in path))
+        ax.scatter(
+            xs,
+            ys,
+            color=color,
+            s=20,
+            zorder=zorder + 1,
+        )
+
+    def draw_gate(gate: Gate, *, zorder: int = 10) -> None:
+        """
+        Draw CNOT endpoints.
+
+        gate = (control, target)
         """
 
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(8, 8))
-        else:
-            fig = ax.figure
+        control, target = gate
 
-        # If graph nodes are already coordinates like (i, j), use them as positions.
-        # If you stored node positions in self.g.nodes[n]["pos"], this also supports that.
-        graph_pos = nx.get_node_attributes(graph, "pos")
-        if not graph_pos:
-            graph_pos = {node: node for node in graph.nodes}
+        cx, cy = xy(control)
+        tx, ty = xy(target)
 
-        def xy(node):
-            p = graph_pos.get(node, node)
-            return p[0], p[1]
-        def draw_gate(gate, zorder=10):
-            """
-            Draw the gate endpoints.
-
-            For CNOT:
-                gate = (control, target)
-
-            For T gate:
-                gate = pos
-            """
-
-            # CNOT gate
-            if isinstance(gate[0], tuple) and isinstance(gate[1], tuple):
-                control, target = gate
-
-                cx, cy = xy(control)
-                tx, ty = xy(target)
-
-                # control node
-                ax.scatter(
-                    [cx],
-                    [cy],
-                    color="red",
-                    s=120,
-                    edgecolors="black",
-                    linewidths=1.0,
-                    zorder=zorder,
-                    label="control",
-                )
-                ax.text(cx + 0.12, cy + 0.12, "C", fontsize=10, zorder=zorder + 1)
-
-                # target node
-                ax.scatter(
-                    [tx],
-                    [ty],
-                    color="purple",
-                    s=120,
-                    edgecolors="black",
-                    linewidths=1.0,
-                    zorder=zorder,
-                    label="target",
-                )
-                ax.text(tx + 0.12, ty + 0.12, "T", fontsize=10, zorder=zorder + 1)
-
-            # Single-qubit gate, e.g. T gate
-            else:
-                x, y = xy(gate)
-
-                ax.scatter(
-                    [x],
-                    [y],
-                    color="red",
-                    s=120,
-                    edgecolors="black",
-                    linewidths=1.0,
-                    zorder=zorder,
-                    label="single-qubit gate",
-                )
-                ax.text(x + 0.12, y + 0.12, "T", fontsize=10, zorder=zorder + 1)
-        def draw_path(path, color, label=None, linewidth=3.0, linestyle="-", zorder=3):
-            if path is None or len(path) == 0:
-                return
-
-            for u, v in zip(path[:-1], path[1:]):
-                x1, y1 = xy(u)
-                x2, y2 = xy(v)
-                ax.plot(
-                    [x1, x2],
-                    [y1, y2],
-                    color=color,
-                    linewidth=linewidth,
-                    linestyle=linestyle,
-                    solid_capstyle="round",
-                    zorder=zorder,
-                    label=label,
-                )
-                label = None
-
-            xs, ys = zip(*(xy(node) for node in path))
-            ax.scatter(xs, ys, color=color, s=20, zorder=zorder + 1)
-
-        # -------------------------
-        # 1. Draw background graph
-        # -------------------------
-        nx.draw_networkx_edges(
-            graph,
-            pos=graph_pos,
-            ax=ax,
-            edge_color="lightgray",
-            width=1.0,
-            alpha=0.7,
+        ax.scatter(
+            [cx],
+            [cy],
+            color="red",
+            s=120,
+            edgecolors="black",
+            linewidths=1.0,
+            zorder=zorder,
+            label=label_once("control"),
         )
-        nx.draw_networkx_nodes(
-            graph,
-            pos=graph_pos,
-            ax=ax,
-            node_size=20,
-            node_color="lightgray",
-            alpha=0.8,
+        ax.text(
+            cx + 0.12,
+            cy + 0.12,
+            "C",
+            fontsize=10,
+            zorder=zorder + 1,
         )
 
-        # -------------------------
-        # 2. Select routes to plot
-        # -------------------------
-        if layer_idx is None:
-            selected_routes = routes.items()
-            title = "All routes"
-        else:
-            selected_routes = [
-                (key, route_info)
-                for key, route_info in routes.items()
-                if key[0] == layer_idx
-            ]
-            title = f"Routes in layer {layer_idx}"
+        ax.scatter(
+            [tx],
+            [ty],
+            color="purple",
+            s=120,
+            edgecolors="black",
+            linewidths=1.0,
+            zorder=zorder,
+            label=label_once("target"),
+        )
+        ax.text(
+            tx + 0.12,
+            ty + 0.12,
+            "T",
+            fontsize=10,
+            zorder=zorder + 1,
+        )
 
-        # -------------------------
-        # 3. Draw routes
-        # -------------------------
-        used_green_label = False
-        used_blue_label = False
-        used_ancilla_label = False
+    # --------------------------------------------------
+    # 3. Draw background graph
+    # --------------------------------------------------
+    nx.draw_networkx_edges(
+        graph,
+        pos=graph_pos,
+        ax=ax,
+        edge_color="lightgray",
+        width=1.0,
+        alpha=0.7,
+    )
 
-        for (lyr, gate), route_info in selected_routes:
-            path = route_info["path"]
-            ancilla_idx = route_info["ancilla"]
-            subpath1 = route_info["subpath1"]
-            subpath2 = route_info["subpath2"]
+    nx.draw_networkx_nodes(
+        graph,
+        pos=graph_pos,
+        ax=ax,
+        node_size=20,
+        node_color="lightgray",
+        alpha=0.8,
+    )
 
+    # --------------------------------------------------
+    # 4. Select routes
+    # --------------------------------------------------
+    if layer_idx is None:
+        selected_routes: list[tuple[int, Gate, RouteInfo]] = [
+            (lyr, gate, route_info)
+            for lyr, layer_routes in routes_by_layer.items()
+            for gate, route_info in layer_routes.items()
+        ]
+        title = "All fine-grained routes"
+    else:
+        selected_routes = [
+            (layer_idx, gate, route_info)
+            for gate, route_info in routes_by_layer.get(layer_idx, {}).items()
+        ]
+        title = f"Fine-grained routes in layer {layer_idx}"
 
+    # --------------------------------------------------
+    # 5. Draw routes
+    # --------------------------------------------------
+    for lyr, gate, route_info in selected_routes:
+        path = route_info.path
+        ancilla_node = route_info.ancilla
 
-            draw_path(subpath1, color="green", linestyle="-", label=None , zorder=4)
-            used_green_label = True
-            draw_path(subpath2, color="blue", linestyle="--", linewidth=2.0, label = None, zorder=5)
-            used_blue_label = True
+        # First-routed part
+        draw_path(
+            route_info.subpath1,
+            color="green",
+            linestyle="-",
+            linewidth=3.0,
+            label="subpath1 / routed first",
+            zorder=4,
+        )
 
-            # Draw ancilla
-            ancilla_node = path[ancilla_idx]
-            x, y = xy(ancilla_node)
-            ax.scatter(
-                [x],
-                [y],
-                color="orange",
-                s=90,
-                edgecolors="black",
-                linewidths=0.8,
-                zorder=8,
-                label=None if used_ancilla_label else "ancilla",
+        # Second-routed part
+        draw_path(
+            route_info.subpath2,
+            color="blue",
+            linestyle="--",
+            linewidth=2.2,
+            label="subpath2 / routed second",
+            zorder=5,
+        )
+
+        # Full path faintly underneath, optional but useful for debugging.
+        if show_route_label:
+            mid_idx = len(path) // 2
+            mx, my = xy(path[mid_idx])
+            ax.text(
+                mx + 0.08,
+                my + 0.08,
+                f"L{lyr}",
+                fontsize=8,
+                zorder=9,
             )
-            used_ancilla_label = True
 
-            # Draw gate endpoints
-            draw_gate(gate)
+        # Ancilla
+        ax.scatter(
+            [xy(ancilla_node)[0]],
+            [xy(ancilla_node)[1]],
+            color="orange",
+            s=90,
+            edgecolors="black",
+            linewidths=0.8,
+            zorder=8,
+            label=label_once("ancilla"),
+        )
 
-            if show_gate_label:
-                ax.text(
-                    x + 0.1,
-                    y + 0.1,
-                    f"L{lyr}: {gate}",
-                    fontsize=8,
-                    zorder=9,
-                )
+        # Gate endpoints
+        draw_gate(gate)
 
-        ax.set_title(title)
-        ax.set_aspect("equal")
-        ax.axis("off")
+        # Optional full gate label
+        if show_gate_label:
+            x, y = xy(ancilla_node)
+            ax.text(
+                x + 0.12,
+                y + 0.12,
+                f"L{lyr}: {gate}\nfirst={route_info.first_part}",
+                fontsize=8,
+                zorder=9,
+            )
+
+    # --------------------------------------------------
+    # 6. Final formatting
+    # --------------------------------------------------
+    ax.set_title(title)
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
         ax.legend(loc="best")
 
-        if save_path is not None:
-            fig.savefig(save_path, bbox_inches="tight", dpi=300)
+    if save_path is not None:
+        fig.savefig(save_path, bbox_inches="tight", dpi=300)
 
-        if show:
-            plt.show()
+    if show:
+        plt.show()
 
-        return fig, ax
+    return fig, ax
