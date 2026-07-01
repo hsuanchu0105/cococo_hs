@@ -695,7 +695,13 @@ class BasicRouter:
 
             chosen_case = None    
 
-            if new_left_ok and old_right_ok:
+            if new_left_ok and old_left_ok:
+                chosen_case = ("left", "left")
+
+            elif new_right_ok and old_right_ok:
+                chosen_case = ("right", "right")
+
+            elif new_left_ok and old_right_ok:
                 chosen_case = ("left", "right")
 
             elif new_right_ok and old_left_ok:
@@ -719,16 +725,19 @@ class BasicRouter:
             # --------------------------------------------------
             if new_side == "left":
                 a1 = random.randint(1, ov_start - 1)
-                new_first_part = "control"
             else:
                 a1 = random.randint(ov_end + 1, len(new_path) - 2)
-                new_first_part = "control"
 
             if old_side == "left":
                 a2 = random.randint(1, ov_st2 - 1)
-                old_first_part = "control"
             else:
                 a2 = random.randint(ov_end2 + 1, len(path_ov) - 2)
+
+            if chosen_case == ("left", "left") or chosen_case == ("right", "right"):
+                new_first_part = "control"
+                old_first_part = "target"
+            elif chosen_case == ("left", "right") or chosen_case == ("right", "left"):
+                new_first_part = "control"
                 old_first_part = "control"
 
 
