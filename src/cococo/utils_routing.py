@@ -910,7 +910,76 @@ class BasicRouter:
         return remainder_terminal_pairs
     
 
+    def find_total_fine_grained_vdp_dyn(
+    self,
+    layers,
+    logical_pos,
+    factory_times,
+    layout = None,
+    overlap_type: str = "strict2",
+    ):
+        if self.use_dag and layout is None:
+            raise ValueError(
+                "If self.use_dag=True, layout must be provided."
+            )
 
+        # Optional but recommended: clear previous fine-grained routing state
+        self.routes_by_layer.clear()
+        self.overlap_graphs.clear()
+        self.node_to_gates_by_layer.clear()
+
+        remaining_layers = [layer.copy() for layer in layers]
+
+        # Build DAG if needed
+        if self.use_dag:
+            terminal_pairs_temp = []
+            for layer in remaining_layers:
+                terminal_pairs_temp += layer
+
+            dag = dag_helper.terminal_pairs_into_dag(
+                terminal_pairs_temp,
+                layout,
+            )
+        else:
+            dag = None
+
+        fine_layer_idx = 0
+
+        while remaining_layers:
+            if self.use_dag:
+                current_layer = dag_helper.extract_layer_from_dag(
+                    dag,
+                    layout,
+                    0,
+                )
+            else:
+                current_layer = remaining_layers[0]
+
+            terminal_pairs_remainder = self.find_fine_grained_vdp(
+                fine_layer_idx,
+                current_layer,
+                logical_pos,
+                factory_times,
+                overlap_type,
+            )
+
+            if self.use_dag:
+                remaining_layers, dag = dag_helper.push_remainder_into_layers_dag(
+                    dag,
+                    terminal_pairs_remainder,
+                    layout,
+                    current_layer,
+                )
+            else:
+                remaining_layers = self.push_remainder_into_layers(
+                    remaining_layers,
+                    terminal_pairs_remainder,
+                    delete_layer_zero=True,
+                )
+
+            fine_layer_idx += 1
+
+  
 
     def push_remainder_into_layers(
         self,
@@ -931,13 +1000,21 @@ class BasicRouter:
             list[list[tuple[int,int]]]: layered gates with remainder being pushed into next layer.
         """
         initial_layers = layers.copy()
-        if delete_layer_zero:
-            if len(initial_layers) > 1:
-                del initial_layers[
-                    0
-                ]  # delete already processed layer (remainder was part of this layer)
-            elif len(initial_layers) == 1 and len(remainder) != 0:
-                del initial_layers[0]
+
+        #if delete_layer_zero:
+        #    if len(initial_layers) > 1:
+        #        del initial_layers[
+        #            0
+        #        ]  # delete already processed layer (remainder was part of this layer)
+        #    elif len(initial_layers) == 1 and len(remainder) != 0:
+        #        del initial_layers[0]
+
+        if delete_layer_zero and len(initial_layers) > 0:
+            del initial_layers[0]
+
+        if not remainder:
+            return initial_layers
+        
         i = 0
         flag = True
         while flag is True:

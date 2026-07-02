@@ -52,7 +52,7 @@ router = utils.BasicRouter(g, data_qubit_locs, factories, valid_path = "cc", t=t
 layers = router.split_layer_terminal_pairs(terminal_pairs)
 
 i = 0
-
+"""
 while i < len(layers):
     terminal_pairs_remainder = router.find_fine_grained_vdp(
         i,
@@ -86,7 +86,8 @@ while i < len(layers):
 
     i += 1
 
-
+"""
+router.find_total_fine_grained_vdp_dyn(layers, None, None, layout = layout)
 print(router.overlap_graphs.values())
 print(router.routes_by_layer)
 
