@@ -963,10 +963,10 @@ def plot_fine_routes(
         # First-routed part
         draw_path(
             route_info.subpath1,
-            color="green",
+            color="limegreen",
             linestyle="-",
             linewidth=3.0,
-            label="subpath1 / routed first",
+            label="subpath1",
             zorder=4,
         )
 
@@ -976,7 +976,7 @@ def plot_fine_routes(
             color="blue",
             linestyle="--",
             linewidth=2.2,
-            label="subpath2 / routed second",
+            label="subpath2",
             zorder=5,
         )
 
@@ -1036,3 +1036,174 @@ def plot_fine_routes(
         plt.show()
 
     return fig, ax
+
+
+from matplotlib.animation import FuncAnimation, PillowWriter, FFMpegWriter
+from collections import defaultdict
+from pathlib import Path
+
+
+
+def animate_fine_routes(
+    graph: nx.Graph,
+    routes_by_layer: dict[int, dict[Gate, RouteInfo]],
+    *,
+    layer_idx: int | None = None,
+    interval: int = 800,
+    pause_between_layers: int = 2,
+    repeat: bool = False,
+    save_path: str | None = None,
+    show_gate_label: bool = False,
+    show_route_label: bool = False,
+    figsize: tuple[float, float] = (8, 8),
+):
+    """
+    Animate fine-grained routes layer by layer.
+
+    Within each layer:
+        routes are added one by one.
+
+    Between layers:
+        the plot resets; previous-layer routes are not shown.
+
+    Saving:
+        .html gives browser controls, including manual pause/play.
+        .gif gives a plain animation.
+        .mp4 gives a video file.
+    """
+
+    # --------------------------------------------------
+    # 1. Choose layers
+    # --------------------------------------------------
+    if layer_idx is None:
+        layer_indices = sorted(routes_by_layer.keys())
+    else:
+        layer_indices = [layer_idx]
+
+    # --------------------------------------------------
+    # 2. Build frame list
+    # --------------------------------------------------
+    frames: list[tuple[int, int]] = []
+
+    for lyr in layer_indices:
+        layer_routes = routes_by_layer.get(lyr, {})
+
+        if not layer_routes:
+            continue
+
+        num_routes = len(layer_routes)
+
+        # Add routes one by one within this layer
+        for k in range(1, num_routes + 1):
+            frames.append((lyr, k))
+
+        # Repeat final frame of this layer to create automatic pause
+        for _ in range(pause_between_layers):
+            frames.append((lyr, num_routes))
+
+    if not frames:
+        raise ValueError("No routes to animate.")
+
+    # --------------------------------------------------
+    # 3. Build partial routes for one frame
+    # --------------------------------------------------
+    def build_frame_routes(
+        lyr: int,
+        num_routes_to_show: int,
+    ) -> dict[int, dict[Gate, RouteInfo]]:
+        frame_routes: dict[int, dict[Gate, RouteInfo]] = defaultdict(dict)
+
+        layer_items = list(routes_by_layer[lyr].items())
+
+        for gate, route_info in layer_items[:num_routes_to_show]:
+            frame_routes[lyr][gate] = route_info
+
+        return frame_routes
+
+    # --------------------------------------------------
+    # 4. Create figure
+    # --------------------------------------------------
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # --------------------------------------------------
+    # 5. Frame update
+    # --------------------------------------------------
+    def update(frame_idx: int):
+        ax.clear()
+
+        lyr, num_routes_to_show = frames[frame_idx]
+
+        frame_routes = build_frame_routes(
+            lyr,
+            num_routes_to_show,
+        )
+
+        plot_fine_routes(
+            graph=graph,
+            routes_by_layer=frame_routes,
+            layer_idx=lyr,
+            ax=ax,
+            show=False,
+            save_path=None,
+            show_gate_label=show_gate_label,
+            show_route_label=show_route_label,
+        )
+
+        total_routes_in_layer = len(routes_by_layer[lyr])
+
+        ax.set_title(
+            f"Fine-grained routes: layer {lyr}\n"
+            f"Showing {num_routes_to_show}/{total_routes_in_layer} routes "
+            #f"(frame {frame_idx + 1}/{len(frames)})"
+        )
+
+        return []
+
+    # --------------------------------------------------
+    # 6. Build animation
+    # --------------------------------------------------
+    anim = FuncAnimation(
+        fig,
+        update,
+        frames=len(frames),
+        interval=interval,
+        repeat=repeat,
+        blit=False,
+    )
+
+    # --------------------------------------------------
+    # 7. Save if requested
+    # --------------------------------------------------
+    if save_path is not None:
+        save_path = str(save_path)
+        suffix = Path(save_path).suffix.lower()
+
+        fps = max(1, 1000 // interval)
+
+        if suffix == ".gif":
+            anim.save(
+                save_path,
+                writer=PillowWriter(fps=fps),
+            )
+
+        elif suffix == ".mp4":
+            anim.save(
+                save_path,
+                writer=FFMpegWriter(fps=fps),
+            )
+
+        elif suffix == ".html":
+            html = anim.to_jshtml()
+
+            with open(save_path, "w", encoding="utf-8") as f:
+                f.write(html)
+
+        else:
+            raise ValueError(
+                "save_path must end with '.html', '.gif', or '.mp4'. "
+                f"Got: {save_path}"
+            )
+
+    plt.close(fig)
+
+    return anim

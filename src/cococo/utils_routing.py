@@ -536,11 +536,11 @@ class BasicRouter:
         This is a virtual graph. It does not modify self.overlap_graphs.
         """
 
-        print("local overlap function check: ")
-        print("Gate: ", route_info.gate)
+        #print("local overlap function check: ")
+        #print("Gate: ", route_info.gate)
         G = self.overlap_graphs[layer_idx]
 
-        print("Overlap graph before adding this path", G)
+        #print("Overlap graph before adding this path", G)
 
         direct_overlaps = self.candidate_direct_overlaps(
             layer_idx,
@@ -671,10 +671,10 @@ class BasicRouter:
             d12 = len(new_path) - 1 - ov_end
             d22 = len(path_ov) - 1 - ov_end2
 
-            print("new path: Control to overlap: ", d11)
-            print("new path: Target to overlap: ", d12)
-            print("old path: Control to overlap: ", d21)
-            print("old path: Target to overlap: ", d22)
+            #print("new path: Control to overlap: ", d11)
+            #print("new path: Target to overlap: ", d12)
+            #print("old path: Control to overlap: ", d21)
+            #print("old path: Target to overlap: ", d22)
             # A side is usable if there is at least one internal node
             # where we can place the ancilla.
             new_left_ok = d11 >= 2
@@ -719,7 +719,7 @@ class BasicRouter:
                 )
 
             new_side, old_side = chosen_case
-            print("chosen case:", chosen_case)
+            #print("chosen case:", chosen_case)
             # --------------------------------------------------
             # 6. Randomly choose valid ancilla positions
             # --------------------------------------------------
@@ -741,8 +741,8 @@ class BasicRouter:
                 old_first_part = "control"
 
 
-            print("new first part:", new_first_part)
-            print("old first part:", old_first_part)
+            #print("new first part:", new_first_part)
+            #print("old first part:", old_first_part)
             # --------------------------------------------------
             # 7. Return updated RouteInfo objects
             # --------------------------------------------------
@@ -776,8 +776,9 @@ class BasicRouter:
     include_endpoints: bool = True,
     ) -> None:
         gate = route_info.gate
-        G = self.overlap_graphs[layer_idx]
+        
         node_to_gates = self.node_to_gates_by_layer[layer_idx]
+        G = self.overlap_graphs[layer_idx]
 
         # 1. Store route
         self.routes_by_layer[layer_idx][gate] = route_info
@@ -793,7 +794,7 @@ class BasicRouter:
                 if other_gate == gate:
                     continue
 
-                if G.has_edge(gate, other_gate):
+                if self.overlap_graphs[layer_idx].has_edge(gate, other_gate):
                     G[gate][other_gate]["overlap_nodes"].add(node)
                     G[gate][other_gate]["num_overlap"] = len(
                         G[gate][other_gate]["overlap_nodes"]
@@ -807,6 +808,8 @@ class BasicRouter:
                     )
 
             existing_gates.add(gate)
+        
+        print("updated overlap graph: ", G)
 
     def find_fine_grained_vdp(self,
             layer_idx: int,
@@ -818,6 +821,7 @@ class BasicRouter:
             
         paths_current_layer = [] 
         gates_current_layer = layer.copy()
+        remainder_terminal_pairs = []
         for gate in gates_current_layer:
 
             g_temp = self.g.copy()
@@ -829,7 +833,7 @@ class BasicRouter:
             g_temp.remove_nodes_from(nodes_to_remove)
 
             path = self.valid_path_method()(g_temp, gate[0], gate[1])
-            print("Gate", gate, " : ", path )
+            #print("Gate", gate, " : ", path )
             route_info = self.make_route_info(
                 gate,
                 path,
@@ -838,9 +842,10 @@ class BasicRouter:
             )
             if paths_current_layer:
                 local_og = self.get_local_overlap_graph(layer_idx, route_info)
-                print("local overlap graph: ", local_og)
+                #print("local overlap graph: ", local_og)
                 for u, v, data in local_og.edges(data=True):
-                    print(u, "<->", v, data)
+                    pass
+                    #print(u, "<->", v, data)
                 if overlap_type == "strict2":          
                     if local_og.number_of_nodes() >= 3:
                         valid = False
@@ -853,7 +858,7 @@ class BasicRouter:
                     else:
                         old_gates = [gt for gt in local_og.nodes if gt != route_info.gate]
                         old_gate = old_gates[0]
-                        print("old gate: ",  old_gate)
+                        #print("old gate: ",  old_gate)
                         path_ov_info = self.routes_by_layer[layer_idx][old_gate]
 
                         valid, updated_new, updated_old, reason = self.check_validity(
@@ -861,12 +866,11 @@ class BasicRouter:
                             path_ov_info,
                             allowed_overlap="strict2",
                         )
-                        print("updated new path ancilla: ", updated_new.ancilla_idx)
-                        print("updated old path ancilla: ", updated_old.ancilla_idx)
+                        #print("updated new path ancilla: ", updated_new.ancilla_idx)
+                        #print("updated old path ancilla: ", updated_old.ancilla_idx)
 
                     if valid:
                         self.routes_by_layer[layer_idx][old_gate] = updated_old
-                        #! TODO
                         if self.overlap_graphs[layer_idx].has_node(old_gate):
                             self.overlap_graphs[layer_idx].nodes[old_gate]["route_info"] = updated_old
                         self.commit_route(layer_idx, updated_new)
@@ -895,13 +899,15 @@ class BasicRouter:
                     #! TODO 
                     except nx.NetworkXNoPath:
                         print("No path found for gate ", gate)
-                        break
+                        remainder_terminal_pairs.append(gate)
+                        
+                        
 
             else:   
                 paths_current_layer.append(path)
                 self.commit_route(layer_idx, route_info)
 
-
+        return remainder_terminal_pairs
     
 
 

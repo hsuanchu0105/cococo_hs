@@ -12,6 +12,8 @@ import cococo.circuit_construction as circuit_construction
 import cococo.internal_testing as internal_testing
 import plotting
 from cococo.animations import plot_fine_routes
+from cococo.animations import animate_fine_routes
+import cococo.dag_helper as dag_helper
 
 from datetime import datetime
 
@@ -48,12 +50,57 @@ terminal_pairs = layouts.translate_layout_circuit(pairs, layout) #let's stick to
 router = utils.BasicRouter(g, data_qubit_locs, factories, valid_path = "cc", t=t, metric = "exact", use_dag = True)
 # each layer has disjoint logical support, however it doesn't guarantee that all those gates can be physically routed at the same time on the lattice
 layers = router.split_layer_terminal_pairs(terminal_pairs)
-paths = router.find_fine_grained_vdp(0, layers[0], None, None, "strict2")
+
+i = 0
+
+while i < len(layers):
+    terminal_pairs_remainder = router.find_fine_grained_vdp(
+        i,
+        layers[i],
+        None,
+        None,
+        "strict2",
+    )
+
+    if router.use_dag:
+        next_layer_update, dag = dag_helper.push_remainder_into_layers_dag(
+            dag,
+            terminal_pairs_remainder,
+            layout,
+            layers[i],
+        )
+
+        # You need to decide how next_layer_update corresponds to layers.
+        # If it represents the remaining future layers, assign it carefully.
+        layers = layers[: i+1] + next_layer_update
+
+    else:
+        if terminal_pairs_remainder:
+            future_layers_update = router.push_remainder_into_layers(
+                layers[i+1 :],
+                terminal_pairs_remainder,
+                delete_layer_zero=False,
+            )
+
+            layers = layers[: i+1] + future_layers_update
+
+    i += 1
 
 
-
-print(router.overlap_graphs)
+print(router.overlap_graphs.values())
 print(router.routes_by_layer)
 
 
-plot_fine_routes(g, router.routes_by_layer)
+#plot_fine_routes(g, router.routes_by_layer)
+
+Path("animation").mkdir(exist_ok=True)
+filename = f"../../Output_Files/animation/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.html"
+
+animate_fine_routes(
+    graph=router.g,
+    routes_by_layer=router.routes_by_layer,
+    interval=800,
+    pause_between_layers=0,
+    save_path=filename, 
+)
+
