@@ -19,7 +19,7 @@ from datetime import datetime
 
 seed = 45
 
-layout_type = "single"
+layout_type = "triple"
 m = 4
 n = 4
 factories = []
@@ -50,6 +50,8 @@ terminal_pairs = layouts.translate_layout_circuit(pairs, layout) #let's stick to
 router = utils.BasicRouter(g, data_qubit_locs, factories, valid_path = "cc", t=t, metric = "exact", use_dag = True)
 # each layer has disjoint logical support, however it doesn't guarantee that all those gates can be physically routed at the same time on the lattice
 layers = router.split_layer_terminal_pairs(terminal_pairs)
+vdp_layers, _ = router.find_total_vdp_layers_dyn(layers, data_qubit_locs, router.factory_times, layout, testing = True)
+print("Len of schedule without teleportation: ", len(vdp_layers))
 
 i = 0
 """
@@ -88,9 +90,9 @@ while i < len(layers):
 
 """
 router.find_total_fine_grained_vdp_dyn(layers, None, None, layout = layout)
-print(router.overlap_graphs.values())
-print(router.routes_by_layer)
-
+#print(router.overlap_graphs.values())
+#print(router.routes_by_layer)
+print("Len of schedule (fine grained): ", len(router.routes_by_layer))
 
 #plot_fine_routes(g, router.routes_by_layer)
 
@@ -103,5 +105,6 @@ animate_fine_routes(
     interval=800,
     pause_between_layers=0,
     save_path=filename, 
+    figsize=(18, 8),
 )
 
