@@ -587,7 +587,45 @@ class BasicRouter:
     def check_validity(
         self,
         new_info: RouteInfo,
-        #local_ov_gf: nx.Graph, 
+        local_og: nx.Graph,
+        allowed_overlap: str = "strict2",
+    ) -> tuple[bool, dict[Gate, RouteInfo] | None, str]:
+        """
+        Dispatch overlap-validity checking on the chosen method.
+
+        Given the candidate route `new_info` and the local overlap graph `local_og`
+        (the connected component the candidate joins, carrying every gate's RouteInfo
+        on its nodes and pairwise `overlap_nodes` on its edges), decide whether the
+        whole component can be routed in the two-phase model.
+
+        Returns (valid, updated, reason) where `updated` maps every gate in the
+        component (the candidate plus any re-assigned existing routes) to its final
+        RouteInfo, or None when the candidate cannot be placed.
+        """
+        if allowed_overlap == "strict2":
+            others = [g for g in local_og.nodes if g != new_info.gate]
+            if len(others) != 1:
+                return False, None, (
+                    f"strict2 expects exactly one overlapping path, got {len(others)}."
+                )
+            path_ov_info = local_og.nodes[others[0]]["route_info"]
+            valid, upd_new, upd_old, reason = self._check_validity_strict2(
+                new_info, path_ov_info
+            )
+            if not valid:
+                return False, None, reason
+            return True, {new_info.gate: upd_new, path_ov_info.gate: upd_old}, reason
+        elif allowed_overlap == "strict_k":
+            return self._check_validity_strict_k(local_og)
+        else:
+            raise NotImplementedError(
+                f"Unknown allowed_overlap={allowed_overlap!r}"
+            )
+
+    def _check_validity_strict2(
+        self,
+        new_info: RouteInfo,
+        #local_ov_gf: nx.Graph,
         path_ov_info: RouteInfo,
         allowed_overlap: str = "strict2",
     ) -> tuple[bool, RouteInfo | None, RouteInfo | None, str]:
@@ -762,6 +800,196 @@ class BasicRouter:
 
             return True, updated_new_info, updated_path_ov_info, reason
     
+    @staticmethod
+    def _is_consecutive(sorted_idxs: list[int]) -> bool:
+        """True if the sorted indices form one contiguous run (a single block)."""
+        return all(
+            sorted_idxs[k + 1] - sorted_idxs[k] == 1
+            for k in range(len(sorted_idxs) - 1)
+        )
+
+    @staticmethod
+    def _block_phase(side: str, first_part: FirstPart) -> int:
+        """
+        Phase (1 = routed first, 2 = routed second) in which a path occupies a block
+        that lies on the given side of its ancilla, given which end is routed first.
+
+        control side = path[:ancilla]; target side = path[ancilla:].
+        """
+        if side == "control":
+            return 1 if first_part == "control" else 2
+        return 2 if first_part == "control" else 1
+
+    @staticmethod
+    def _ancilla_region_bounds(
+        path_len: int,
+        blocks: list[dict],
+        region: int,
+    ) -> tuple[int, int]:
+        """
+        Inclusive [lo, hi] range of ancilla indices for `region` of a path.
+
+        `region` == j means the ancilla sits between block j-1 and block j, so blocks
+        0..j-1 fall on the control side and blocks j..end on the target side. The
+        ancilla must be an internal node (1..path_len-2) strictly outside every block.
+        Returns lo > hi when the gap has no room for an ancilla.
+        """
+        m = len(blocks)
+        lo = 1 if region == 0 else blocks[region - 1]["end"] + 1
+        hi = (path_len - 2) if region == m else blocks[region]["start"] - 1
+        return lo, hi
+
+    def _check_validity_strict_k(
+        self,
+        local_og: nx.Graph,
+    ) -> tuple[bool, dict[Gate, RouteInfo] | None, str]:
+        """
+        General overlap criterion for a component of paths (caller caps the size).
+
+        Two-phase model: each path is split at an ancilla into a first part (phase 1)
+        and a second part (phase 2). All first parts must be pairwise node-disjoint and
+        all second parts pairwise node-disjoint. Every grid node has capacity 2, so a
+        node shared by >= 3 paths is infeasible.
+
+        The routine re-solves the whole component: it may re-assign the ancilla_idx and
+        first_part of already-committed paths as well as the new candidate. On success
+        it returns (True, {gate: updated RouteInfo for every gate}, reason).
+        """
+        gates = list(local_og.nodes)
+        route_infos = {g: local_og.nodes[g]["route_info"] for g in gates}
+
+        # 1. Reject any grid node shared by >= 3 paths (infeasible in two phases).
+        node_count: dict[pos, int] = defaultdict(int)
+        for g in gates:
+            for node in route_infos[g].path:
+                node_count[node] += 1
+        if any(c >= 3 for c in node_count.values()):
+            return False, None, "A grid node is shared by >= 3 paths."
+
+        # 2. Build each gate's overlap blocks from the component's edges.
+        idx_of = {
+            g: {node: i for i, node in enumerate(route_infos[g].path)}
+            for g in gates
+        }
+        blocks_by_gate: dict[Gate, list[dict]] = {g: [] for g in gates}
+
+        for g, h in local_og.edges:
+            overlap_nodes = local_og[g][h].get("overlap_nodes")
+            if not overlap_nodes:
+                return False, None, f"Edge {g}-{h} carries no overlap_nodes."
+
+            ig = sorted(idx_of[g][n] for n in overlap_nodes)
+            ih = sorted(idx_of[h][n] for n in overlap_nodes)
+            if not self._is_consecutive(ig) or not self._is_consecutive(ih):
+                return (
+                    False,
+                    None,
+                    f"Overlap between {g} and {h} is not a single consecutive block.",
+                )
+
+            blocks_by_gate[g].append({"start": ig[0], "end": ig[-1], "neighbor": h})
+            blocks_by_gate[h].append({"start": ih[0], "end": ih[-1], "neighbor": g})
+
+        for g in gates:
+            blocks_by_gate[g].sort(key=lambda b: b["start"])
+
+        # 3. Per gate, enumerate placement options (ancilla region x first_part).
+        #    Each option maps every neighbour's block to a phase.
+        options_by_gate: dict[Gate, list[dict]] = {}
+        for g in gates:
+            path_len = len(route_infos[g].path)
+            blocks = blocks_by_gate[g]
+            gate_options: list[dict] = []
+            for region in range(len(blocks) + 1):
+                lo, hi = self._ancilla_region_bounds(path_len, blocks, region)
+                if lo > hi:
+                    continue  # no room for an ancilla in this gap
+                for first_part in ("control", "target"):
+                    phase_of_block = {
+                        b["neighbor"]: self._block_phase(
+                            "control" if bi < region else "target",
+                            first_part,
+                        )
+                        for bi, b in enumerate(blocks)
+                    }
+                    gate_options.append(
+                        {
+                            "lo": lo,
+                            "hi": hi,
+                            "first_part": first_part,
+                            "phase_of_block": phase_of_block,
+                        }
+                    )
+            if not gate_options:
+                return False, None, f"No room to place an ancilla on gate {g}."
+            options_by_gate[g] = gate_options
+
+        # 4. Backtracking search for a component-wide consistent assignment:
+        #    every shared block must be routed in opposite phases by its two paths.
+        chosen: dict[Gate, dict] = {}
+
+        def consistent(g: Gate, opt: dict) -> bool:
+            for h, h_opt in chosen.items():
+                if local_og.has_edge(g, h):
+                    if opt["phase_of_block"][h] == h_opt["phase_of_block"][g]:
+                        return False
+            return True
+
+        def backtrack(i: int) -> bool:
+            if i == len(gates):
+                return True
+            g = gates[i]
+            for opt in options_by_gate[g]:
+                if consistent(g, opt):
+                    chosen[g] = opt
+                    if backtrack(i + 1):
+                        return True
+                    del chosen[g]
+            return False
+
+        if not backtrack(0):
+            return (
+                False,
+                None,
+                "No phase assignment satisfies the two-phase disjointness constraints.",
+            )
+
+        # 5. Materialise concrete ancilla indices and first_part for every gate.
+        updated: dict[Gate, RouteInfo] = {}
+        for g in gates:
+            opt = chosen[g]
+            ancilla_idx = random.randint(opt["lo"], opt["hi"])
+            updated[g] = replace(
+                route_infos[g],
+                ancilla_idx=ancilla_idx,
+                first_part=opt["first_part"],
+            )
+
+        return True, updated, f"Valid strict_k assignment for {len(gates)} paths."
+
+    def _commit_component(
+        self,
+        layer_idx: int,
+        candidate_gate: Gate,
+        updated: dict[Gate, RouteInfo],
+    ) -> None:
+        """
+        Commit a validated overlap component.
+
+        `updated` maps every gate in the component to its final RouteInfo. Existing
+        routes only change ancilla_idx / first_part (their paths are unchanged), so they
+        are updated in place; the new candidate is committed via `commit_route`, which
+        also creates its overlap edges and node_to_gates entries.
+        """
+        for gate, info in updated.items():
+            if gate == candidate_gate:
+                continue
+            self.routes_by_layer[layer_idx][gate] = info
+            if self.overlap_graphs[layer_idx].has_node(gate):
+                self.overlap_graphs[layer_idx].nodes[gate]["route_info"] = info
+
+        self.commit_route(layer_idx, updated[candidate_gate])
+
     def commit_route(
     self,
     layer_idx: int,
@@ -770,7 +998,7 @@ class BasicRouter:
     include_endpoints: bool = True,
     ) -> None:
         """
-        For a valid route, commit the route by storing the route in self.routes_by_layer, 
+        For a valid new route, commit the route by storing the route in self.routes_by_layer, 
         update self.overlap_graphs[layer_idx], and self.node_to_gates_by_layer[layer_idx]
         """
         gate = route_info.gate
@@ -791,7 +1019,8 @@ class BasicRouter:
             for other_gate in existing_gates:
                 if other_gate == gate:
                     continue
-
+                
+                # could happen that two paths overlap with several nodes (consecutively)
                 if self.overlap_graphs[layer_idx].has_edge(gate, other_gate):
                     G[gate][other_gate]["overlap_nodes"].add(node)
                     G[gate][other_gate]["num_overlap"] = len(
@@ -840,61 +1069,65 @@ class BasicRouter:
             )
             if paths_current_layer:
                 local_og = self.get_local_overlap_graph(layer_idx, route_info)
-                
-                if overlap_type == "strict2":          
-                    if local_og.number_of_nodes() >= 3:
-                        valid = False
+                n = local_og.number_of_nodes()
 
-                    elif local_og.number_of_nodes() == 1:
-                        paths_current_layer.append(path)
-                        self.commit_route(layer_idx, route_info)
-                        continue
+                if n == 1:
+                    # No overlap with any committed route in this layer.
+                    self.commit_route(layer_idx, route_info)
+                    paths_current_layer.append(path)
+                    continue
 
-                    else:
-                        old_gates = [gt for gt in local_og.nodes if gt != route_info.gate]
-                        old_gate = old_gates[0]
-                        path_ov_info = self.routes_by_layer[layer_idx][old_gate]
+                # Component-size cap per method (strict2 = 2 paths, strict_k = up to 4).
+                if overlap_type == "strict2":
+                    within_cap = n == 2
+                elif overlap_type == "strict_k":
+                    within_cap = n <= 4
+                else:
+                    raise NotImplementedError(
+                        f"Unknown overlap_type={overlap_type!r}"
+                    )
 
-                        valid, updated_new, updated_old, reason = self.check_validity(
-                            route_info,
-                            path_ov_info,
-                            allowed_overlap="strict2",
-                        )
-                        #print("updated new path ancilla: ", updated_new.ancilla_idx)
-                        #print("updated old path ancilla: ", updated_old.ancilla_idx)
+                if within_cap:
+                    valid, updated, reason = self.check_validity(
+                        route_info,
+                        local_og,
+                        allowed_overlap=overlap_type,
+                    )
+                else:
+                    valid, updated, reason = (
+                        False,
+                        None,
+                        f"Component size {n} exceeds cap for {overlap_type}.",
+                    )
 
-                    if valid:
-                        self.routes_by_layer[layer_idx][old_gate] = updated_old
-                        if self.overlap_graphs[layer_idx].has_node(old_gate):
-                            self.overlap_graphs[layer_idx].nodes[old_gate]["route_info"] = updated_old
-                        self.commit_route(layer_idx, updated_new)
-                        paths_current_layer.append(path)
-                        continue
+                if valid:
+                    self._commit_component(layer_idx, route_info.gate, updated)
+                    paths_current_layer.append(path)
+                    continue
 
-                    # Alternative route
-                    nodes_occupied = [
-                        node
-                        for old_path in paths_current_layer
-                        for node in old_path
-                    ]
+                # Alternative route: re-route avoiding every node already occupied.
+                nodes_occupied = [
+                    node
+                    for old_path in paths_current_layer
+                    for node in old_path
+                ]
 
-                    g_temp.remove_nodes_from(nodes_occupied)
-                    try:
-                        alt_path = self.valid_path_method()(g_temp, gate[0], gate[1])
-                        alt_info = self.make_route_info(
+                g_temp.remove_nodes_from(nodes_occupied)
+                try:
+                    alt_path = self.valid_path_method()(g_temp, gate[0], gate[1])
+                    alt_info = self.make_route_info(
                         gate,
                         alt_path,
                         ancilla_idx=self.default_ancilla_idx(alt_path),
                         first_part="control",
-                        )
-                        paths_current_layer.append(alt_path)
-                        self.commit_route(layer_idx, alt_info)
-                    #! TODO 
-                    except nx.NetworkXNoPath:
-                        logger.info(
+                    )
+                    paths_current_layer.append(alt_path)
+                    self.commit_route(layer_idx, alt_info)
+                except nx.NetworkXNoPath:
+                    logger.info(
                         f"No path found for gate {gate}"
-                        )
-                        remainder_terminal_pairs.append(gate)
+                    )
+                    remainder_terminal_pairs.append(gate)
                         
             else:   
                 paths_current_layer.append(path)

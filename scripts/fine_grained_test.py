@@ -89,7 +89,7 @@ while i < len(layers):
     i += 1
 
 """
-router.find_total_fine_grained_vdp_dyn(layers, None, None, layout = layout)
+router.find_total_fine_grained_vdp_dyn(layers, None, None, layout = layout, overlap_type = "strict_k")
 #print(router.overlap_graphs.values())
 #print(router.routes_by_layer)
 print("Len of schedule (fine grained): ", len(router.routes_by_layer))
