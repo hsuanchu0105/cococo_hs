@@ -19,9 +19,9 @@ from datetime import datetime
 
 seed = 45
 
-layout_type = "triple"
+layout_type = "single"
 m = 4
-n = 4
+n = 8
 factories = []
 remove_edges = False
 g, data_qubit_locs, factory_ring = layouts.gen_layout_scalable(layout_type, m, n, factories, remove_edges)
@@ -34,7 +34,7 @@ t=2
 q = len(data_qubit_locs)
 print("number of data qubits: ", q)
 j = 8
-num_gates = 2 * q
+num_gates = 4 * q
 
 
 # j gates per layer on q qubits 
@@ -89,9 +89,13 @@ while i < len(layers):
     i += 1
 
 """
-router.find_total_fine_grained_vdp_dyn(layers, None, None, layout = layout, overlap_type = "strict_k")
+router.find_total_fine_grained_vdp_dyn(layers, None, None, layout = layout, overlap_type = "strict_k", testing = True)
 #print(router.overlap_graphs.values())
 #print(router.routes_by_layer)
+
+
+    
+
 print("Len of schedule (fine grained): ", len(router.routes_by_layer))
 
 #plot_fine_routes(g, router.routes_by_layer)

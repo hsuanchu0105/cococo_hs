@@ -262,6 +262,37 @@ def check_duplicate_nodes_per_layer(schedule):
     return True
 
 
+def test_duplicate_nodes_fg(routes_by_layer):
+    """
+    Two-phase disjointness check for a fine-grained routing.
+
+    `routes_by_layer` maps layer_idx -> {gate: RouteInfo}. Valid routing requires
+    that all first parts (phase 1) are pairwise node-disjoint and all second parts
+    (phase 2) are pairwise node-disjoint. Cross-phase sharing of a node by two
+    different paths is allowed (node capacity 2), and each path legitimately
+    occupies its own ancilla in both phases, so only like phases are compared.
+
+    Only RouteInfo.subpath1 / RouteInfo.subpath2 are used, so the RouteInfo class
+    does not need to be imported here (which would be a circular import with
+    utils_routing anyway).
+    """
+    for i, layer in routes_by_layer.items():
+        first_part_node = set()
+        second_part_node = set()
+        for route_info in layer.values():
+            for node in route_info.subpath1:
+                if node in first_part_node:
+                    #print("Node ", node, "are duplicated in layer ", i)
+                    return False
+                first_part_node.add(node)
+            for node in route_info.subpath2:
+                if node in second_part_node:
+                    #print("Node ", node, "are duplicated in layer ", i)
+                    return False
+                second_part_node.add(node)
+    return True
+
+
 def check_path_on_logical_st(vdp_layers, logical_pos):
     """checks whether the path occupies any logical pos somewhere else than on the end points. this would be an issue!"""
     for i, vdp_dict in enumerate(vdp_layers):

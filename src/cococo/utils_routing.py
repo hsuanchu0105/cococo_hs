@@ -860,13 +860,14 @@ class BasicRouter:
 
         # 1. Reject any grid node shared by >= 3 paths (infeasible in two phases).
         node_count: dict[pos, int] = defaultdict(int)
-        for g in gates:
-            for node in route_infos[g].path:
+        for gt in gates:
+            for node in route_infos[gt].path:
                 node_count[node] += 1
         if any(c >= 3 for c in node_count.values()):
             return False, None, "A grid node is shared by >= 3 paths."
 
         # 2. Build each gate's overlap blocks from the component's edges.
+        # lookup table 
         idx_of = {
             g: {node: i for i, node in enumerate(route_infos[g].path)}
             for g in gates
@@ -886,10 +887,11 @@ class BasicRouter:
                     None,
                     f"Overlap between {g} and {h} is not a single consecutive block.",
                 )
-
+            # this route overlaps neighbor h from index start to index end
             blocks_by_gate[g].append({"start": ig[0], "end": ig[-1], "neighbor": h})
             blocks_by_gate[h].append({"start": ih[0], "end": ih[-1], "neighbor": g})
 
+        # orders the overlap blocks from left to right along each path.
         for g in gates:
             blocks_by_gate[g].sort(key=lambda b: b["start"])
 
@@ -905,6 +907,7 @@ class BasicRouter:
                 if lo > hi:
                     continue  # no room for an ancilla in this gap
                 for first_part in ("control", "target"):
+                    # decide whether each overlap block lies on the control side or target side of the ancilla 
                     phase_of_block = {
                         b["neighbor"]: self._block_phase(
                             "control" if bi < region else "target",
@@ -936,6 +939,7 @@ class BasicRouter:
             return True
 
         def backtrack(i: int) -> bool:
+            # finish checking all gates -> done 
             if i == len(gates):
                 return True
             g = gates[i]
@@ -1143,6 +1147,7 @@ class BasicRouter:
     factory_times,
     layout = None,
     overlap_type: str = "strict2",
+    testing: bool = False
     ):
         if self.use_dag and layout is None:
             raise ValueError(
@@ -1205,7 +1210,13 @@ class BasicRouter:
 
             fine_layer_idx += 1
 
-  
+        if testing:
+            if tst.test_duplicate_nodes_fg(self.routes_by_layer):
+                logger.info("Successful fine grained routing")
+            else:
+                logger.info("Problematic! Nodes are used by two paths")
+
+
 
     def push_remainder_into_layers(
         self,
