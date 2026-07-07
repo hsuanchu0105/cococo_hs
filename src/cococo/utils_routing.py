@@ -1085,7 +1085,7 @@ class BasicRouter:
                 if overlap_type == "strict2":
                     within_cap = n == 2
                 elif overlap_type == "strict_k":
-                    within_cap = n <= 4
+                    within_cap = n <= 5
                 else:
                     raise NotImplementedError(
                         f"Unknown overlap_type={overlap_type!r}"
