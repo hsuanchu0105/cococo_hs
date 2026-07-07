@@ -34,6 +34,24 @@ def extract_gates_schedule_respect_layout(schedule):
         gates += gates_temp_temp
     return gates
 
+def extract_gates_schedule_fg(routes_by_layer, layout):
+
+    gates = []
+    layout_rev = {j: i for i, j in layout.items()}
+    for layer in routes_by_layer.values():
+        gates_temp = layer.keys()
+        gates_temp_temp = []
+        # translate the gates into number labels, not pos on graph
+        for el in gates_temp:
+            if isinstance(el[0], tuple):
+                # cnot
+                gates_temp_temp.append((layout_rev[el[0]], layout_rev[el[1]]))
+            elif isinstance(el[0], int):
+                gates_temp_temp.append(layout_rev[el])
+        gates += gates_temp_temp
+
+    return gates
+
 
 def check_num_gates(terminal_pairs, schedule) -> bool:
     """check that the input `terminal_pairs` has the same number of gates as the resulting schedule."""
@@ -150,6 +168,78 @@ def check_order_dyn_gates(terminal_pairs, schedule) -> bool:
     initial_state = random_initial_state(n_qubits)
 
     layout = schedule[0]["layout"]
+    layout_rev = {j: i for i, j in layout.items()}
+    # terminal_pairs_trans = [(layout_rev[el[0]], layout_rev[el[1]]) for el in terminal_pairs]
+    terminal_pairs_trans = []
+    for el in terminal_pairs:
+        if isinstance(el[0], tuple):
+            # cnot
+            terminal_pairs_trans.append((layout_rev[el[0]], layout_rev[el[1]]))
+        elif isinstance(el[0], int):
+            terminal_pairs_trans.append(layout_rev[el])
+
+    if not set(terminal_pairs_trans) == set(gates_schedule):
+        print(
+            "terminal_pairs_trans",
+            len(terminal_pairs_trans),
+            "gates_schedule",
+            len(gates_schedule),
+        )
+        print(
+            "in terminal_pairs_trans but not in gates_schedule",
+            set(terminal_pairs_trans) - set(gates_schedule),
+        )
+        print("vice versa", set(gates_schedule) - set(terminal_pairs_trans))
+        if len(set(terminal_pairs_trans) - set(gates_schedule)) != 0:
+            idx_lst = [
+                terminal_pairs_trans.index(el)
+                for el in list(set(terminal_pairs_trans) - set(gates_schedule))
+            ]
+            missing_gates = [terminal_pairs[idx] for idx in idx_lst]
+            print("missing gates geometry:", missing_gates)
+
+        raise ValueError(
+            "Something is wrong with the schedule since the gates of terminal pairs and the schedule do not coincide (order irrelevant here)"
+        )
+
+    initial_circ_order = initial_state.copy()
+    for el in terminal_pairs_trans:
+        if isinstance(el, tuple):
+            initial_circ_order.append("CNOT", [el[0], el[1]])
+        elif isinstance(el, int):
+            initial_circ_order.append("s", el)
+
+    dyn_circ_order = initial_state.copy()
+    for el in gates_schedule:
+        if isinstance(el, tuple):
+            dyn_circ_order.append("CNOT", [el[0], el[1]])
+        elif isinstance(el, int):
+            dyn_circ_order.append("s", el)
+
+    sim1 = stim.TableauSimulator()
+    sim1.do_circuit(initial_circ_order)
+    tableau1 = sim1.current_inverse_tableau()
+
+    sim2 = stim.TableauSimulator()
+    sim2.do_circuit(dyn_circ_order)
+    tableau2 = sim2.current_inverse_tableau()
+
+    return tableau1 == tableau2
+
+def check_order_dyn_gates_fg(terminal_pairs, routes_by_layer, layout) -> bool:
+    """
+    !only works for cnot circuits, for circs with t does not work
+    simulates the gate order in the schedule (changed from pushing) and from initial terminal pairs on a random initial state.
+    the results must coincide to make sure that the pushing is performed correctly.
+    """
+    flattened_pairs = [item for pair in terminal_pairs for item in pair]
+    data_qubit_locs = list(set(flattened_pairs))
+    n_qubits = len(data_qubit_locs)
+
+    gates_schedule = extract_gates_schedule_fg(routes_by_layer, layout)
+    initial_state = random_initial_state(n_qubits)
+
+    #layout = schedule[0]["layout"]
     layout_rev = {j: i for i, j in layout.items()}
     # terminal_pairs_trans = [(layout_rev[el[0]], layout_rev[el[1]]) for el in terminal_pairs]
     terminal_pairs_trans = []

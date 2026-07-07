@@ -1162,6 +1162,9 @@ class BasicRouter:
         self.node_to_gates_by_layer.clear()
 
         remaining_layers = [layer.copy() for layer in layers]
+        terminal_pairs = []
+        for layer in layers:
+            terminal_pairs += layer
 
         # Build DAG if needed
         if self.use_dag:
@@ -1212,12 +1215,18 @@ class BasicRouter:
 
             fine_layer_idx += 1
 
+        
+
         if testing:
             if tst.test_duplicate_nodes_fg(self.routes_by_layer):
                 logger.info("Successful fine grained routing")
             else:
                 logger.info("Problematic! Nodes are used by two paths")
 
+            if tst.check_order_dyn_gates_fg(terminal_pairs, self.routes_by_layer, layout = layout):
+                logger.info("stim test succeeded for fine grained routing (:")
+            else:
+                logger.info("stim test failed - THERE IS A PROBLEM!")
 
 
     def push_remainder_into_layers(
