@@ -1,14 +1,13 @@
 # One-cut two-coloring of segment arrangements
 
-**Problem.** Given k line segments in general position (no three concurrent), each
-segment gets ONE cut point; the two pieces are colored blue/green (equivalently: the
+**Problem.** Given k line segments in general position (no three intersects), each
+segment gets one cut point; the two pieces are colored blue/green (equivalently: the
 color along a segment changes at most once). A coloring is *valid* if at every
-crossing the two segments have different colors. In routing terms: 2 layers, at most
-one via per wire, every crossing must be between different layers.
+crossing the two segments have different colors. 
 
 **Result (computer-assisted, 2026-07-07).**
-- k ≤ 5: a valid coloring ALWAYS exists — even for pseudosegments. Proof: exhaustive
-  check of all 331,776 abstract complete-crossing 5-segment configurations (vertex-0
+- k ≤ 5: a valid coloring ALWAYS exists — even for pseudosegments. 
+  Proof: exhaustive check of all 331,776 abstract complete-crossing 5-segment configurations (vertex-0
   partner order fixed WLOG by relabeling), all satisfiable; non-crossing pairs reduce
   to the complete case by abstractly appending the missing crossing at both segments'
   far ends (adds constraints only).
@@ -16,14 +15,13 @@ one via per wire, every crossing must be between different layers.
   rational brute force over all 211,680 cut placements. Hence counterexamples exist
   for every k ≥ 6 (pad with far-away segments). **6 is the exact threshold.**
 
-**Counterexample** (all pairs cross except S1–S5; 14 crossings):
+**Counterexample** (all pairs cross except S1 and S5; 14 crossings):
 
     S1 (0.51,0.71)–(0.35,0.30)   S2 (0.97,0.53)–(0.38,0.61)   S3 (0.69,0.24)–(0.21,0.97)
     S4 (0.33,0.50)–(0.99,0.59)   S5 (1.00,0.80)–(0.51,0.14)   S6 (0.43,0.86)–(0.70,0.03)
 
 **Key lemma (triangle parity).** In any pairwise-crossing triple, an odd number (1 or 3)
-of the segments must have their cut strictly between their two triangle crossings —
-otherwise the three inequality constraints form an odd cycle.
+of the segments must have their cut strictly between their two triangle crossings.
 
 **Hand proof of the counterexample (pigeonhole, due to Hsuanchu).** The 7 triangles
 {126},{123},{134},{346},{356},{246},{245} have pairwise-disjoint SIDES: every side is

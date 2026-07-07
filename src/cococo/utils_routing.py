@@ -937,9 +937,10 @@ class BasicRouter:
                     if opt["phase_of_block"][h] == h_opt["phase_of_block"][g]:
                         return False
             return True
-
+        
+        #choosing an option for gates[i], the gates before i have already been assigned.
         def backtrack(i: int) -> bool:
-            # finish checking all gates -> done 
+            # already finish checking all gates  
             if i == len(gates):
                 return True
             g = gates[i]
@@ -948,6 +949,7 @@ class BasicRouter:
                     chosen[g] = opt
                     if backtrack(i + 1):
                         return True
+                    # undo the choice if fails
                     del chosen[g]
             return False
 
@@ -1081,7 +1083,7 @@ class BasicRouter:
                     paths_current_layer.append(path)
                     continue
 
-                # Component-size cap per method (strict2 = 2 paths, strict_k = up to 4).
+                # Component-size cap per method (strict2 = 2 paths, strict_k = up to 5).
                 if overlap_type == "strict2":
                     within_cap = n == 2
                 elif overlap_type == "strict_k":
