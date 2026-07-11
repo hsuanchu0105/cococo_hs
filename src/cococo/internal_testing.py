@@ -419,6 +419,18 @@ def check_path_on_logical(schedule):
                     )
     return True
 
+def check_path_on_logical_fg(routes_by_layer, layout):
+    """checks whether a path / tree occupies any logical pos somewhere else than at the end points."""
+    for idx in range(len(routes_by_layer)):
+        for route_info in routes_by_layer[idx].values():
+            logical_pos = list(layout.values())
+            if any(node in logical_pos for node in route_info.path[1:-1]):
+                raise ValueError(
+                    f"In layer {idx} there is a path placed on a logical pos :("
+                )
+        
+    return True
+
 
 def test_times_t_gates_opt(schedule, t, factories):
     """

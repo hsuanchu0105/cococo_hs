@@ -1,0 +1,318 @@
+number of data qubits:  128
+number of gates:  1024
+2026-07-08 09:39:08,234 [INFO] root: stim test succeeded for standard routing (:
+2026-07-08 09:39:08,238 [INFO] root: no duplicates found in standard routing (:
+2026-07-08 09:39:08,279 [INFO] root: paths do not occupy logical pos (:
+2026-07-08 09:39:08,282 [INFO] root: Reset times make sense, all good(:
+Len of schedule without teleportation:  156
+2026-07-08 09:39:09,239 [INFO] root: No path found for gate ((61, 14), (44, 4))
+2026-07-08 09:39:26,749 [INFO] root: No path found for gate ((54, 8), (61, 14))
+2026-07-08 09:39:40,380 [INFO] root: No path found for gate ((36, 4), (54, 8))
+2026-07-08 09:39:44,598 [INFO] root: No path found for gate ((42, 0), (64, 12))
+2026-07-08 09:39:44,620 [INFO] root: No path found for gate ((44, 4), (61, 14))
+2026-07-08 09:39:46,235 [INFO] root: No path found for gate ((64, 12), (44, 4))
+2026-07-08 09:39:51,537 [INFO] root: No path found for gate ((32, 12), (36, 4))
+2026-07-08 09:39:51,905 [INFO] root: No path found for gate ((32, 12), (36, 4))
+2026-07-08 09:39:54,126 [INFO] root: No path found for gate ((61, 14), (54, 8))
+2026-07-08 09:39:58,902 [INFO] root: No path found for gate ((44, 4), (61, 14))
+2026-07-08 09:39:59,748 [INFO] root: No path found for gate ((44, 4), (61, 14))
+2026-07-08 09:40:01,973 [INFO] root: No path found for gate ((64, 12), (42, 0))
+2026-07-08 09:40:02,602 [INFO] root: No path found for gate ((23, 10), (61, 14))
+Len of schedule (fine grained):  140
+BENCH_RESULT seed=21787058 gates=1024 layers=140 seconds=55.2749
+number of data qubits:  128
+number of gates:  1024
+2026-07-08 09:41:49,176 [INFO] root: stim test succeeded for standard routing (:
+2026-07-08 09:41:49,180 [INFO] root: no duplicates found in standard routing (:
+2026-07-08 09:41:49,223 [INFO] root: paths do not occupy logical pos (:
+2026-07-08 09:41:49,225 [INFO] root: Reset times make sense, all good(:
+Len of schedule without teleportation:  200
+2026-07-08 09:41:52,730 [INFO] root: No path found for gate ((57, 14), (58, 8))
+2026-07-08 09:41:54,839 [INFO] root: No path found for gate ((58, 8), (45, 14))
+2026-07-08 09:41:58,297 [INFO] root: No path found for gate ((10, 0), (69, 14))
+2026-07-08 09:42:03,656 [INFO] root: No path found for gate ((51, 2), (26, 0))
+2026-07-08 09:42:03,693 [INFO] root: No path found for gate ((38, 8), (57, 14))
+2026-07-08 09:42:04,369 [INFO] root: No path found for gate ((51, 2), (26, 0))
+2026-07-08 09:42:05,260 [INFO] root: No path found for gate ((51, 2), (26, 0))
+2026-07-08 09:42:09,569 [INFO] root: No path found for gate ((34, 0), (69, 14))
+2026-07-08 09:42:10,304 [INFO] root: No path found for gate ((34, 0), (69, 14))
+2026-07-08 09:42:13,892 [INFO] root: No path found for gate ((46, 8), (45, 14))
+2026-07-08 09:42:18,939 [INFO] root: No path found for gate ((69, 14), (5, 6))
+2026-07-08 09:42:23,979 [INFO] root: No path found for gate ((57, 14), (38, 8))
+2026-07-08 09:42:23,988 [INFO] root: No path found for gate ((34, 0), (69, 14))
+2026-07-08 09:42:29,435 [INFO] root: No path found for gate ((69, 14), (26, 0))
+2026-07-08 09:42:32,052 [INFO] root: No path found for gate ((26, 0), (62, 8))
+2026-07-08 09:42:32,513 [INFO] root: No path found for gate ((51, 2), (45, 14))
+2026-07-08 09:42:32,528 [INFO] root: No path found for gate ((58, 8), (57, 14))
+2026-07-08 09:42:34,744 [INFO] root: No path found for gate ((10, 8), (34, 0))
+2026-07-08 09:42:36,774 [INFO] root: No path found for gate ((26, 0), (38, 8))
+2026-07-08 09:42:38,564 [INFO] root: No path found for gate ((26, 0), (10, 8))
+2026-07-08 09:42:38,634 [INFO] root: No path found for gate ((34, 0), (62, 8))
+2026-07-08 09:42:40,464 [INFO] root: No path found for gate ((5, 6), (69, 14))
+2026-07-08 09:42:41,271 [INFO] root: No path found for gate ((69, 14), (26, 0))
+2026-07-08 09:42:42,365 [INFO] root: No path found for gate ((26, 0), (69, 14))
+2026-07-08 09:42:42,583 [INFO] root: No path found for gate ((26, 0), (69, 14))
+2026-07-08 09:42:43,442 [INFO] root: No path found for gate ((62, 8), (34, 0))
+2026-07-08 09:42:44,551 [INFO] root: No path found for gate ((34, 0), (69, 14))
+2026-07-08 09:42:45,567 [INFO] root: No path found for gate ((51, 2), (45, 14))
+2026-07-08 09:42:45,749 [INFO] root: No path found for gate ((69, 14), (26, 0))
+2026-07-08 09:42:45,855 [INFO] root: No path found for gate ((57, 14), (46, 8))
+2026-07-08 09:42:45,975 [INFO] root: No path found for gate ((34, 0), (69, 14))
+2026-07-08 09:42:47,040 [INFO] root: No path found for gate ((26, 0), (62, 8))
+2026-07-08 09:42:47,206 [INFO] root: No path found for gate ((57, 14), (51, 2))
+2026-07-08 09:42:47,561 [INFO] root: No path found for gate ((51, 2), (57, 14))
+2026-07-08 09:42:47,569 [INFO] root: No path found for gate ((34, 0), (69, 14))
+2026-07-08 09:42:47,615 [INFO] root: No path found for gate ((34, 0), (69, 14))
+2026-07-08 09:42:47,990 [INFO] root: No path found for gate ((57, 14), (58, 8))
+2026-07-08 09:42:48,365 [INFO] root: No path found for gate ((34, 0), (69, 14))
+2026-07-08 09:42:48,436 [INFO] root: No path found for gate ((34, 0), (69, 14))
+Len of schedule (fine grained):  157
+BENCH_RESULT seed=125483928 gates=1024 layers=157 seconds=59.2534
+number of data qubits:  128
+number of gates:  1024
+2026-07-08 09:44:26,431 [INFO] root: stim test succeeded for standard routing (:
+2026-07-08 09:44:26,440 [INFO] root: no duplicates found in standard routing (:
+2026-07-08 09:44:26,479 [INFO] root: paths do not occupy logical pos (:
+2026-07-08 09:44:26,503 [INFO] root: Reset times make sense, all good(:
+Len of schedule without teleportation:  170
+2026-07-08 09:44:29,269 [INFO] root: No path found for gate ((19, 10), (28, 4))
+2026-07-08 09:44:39,513 [INFO] root: No path found for gate ((39, 10), (32, 4))
+2026-07-08 09:44:42,159 [INFO] root: No path found for gate ((52, 12), (32, 4))
+2026-07-08 09:44:48,769 [INFO] root: No path found for gate ((39, 10), (68, 12))
+2026-07-08 09:44:51,679 [INFO] root: No path found for gate ((59, 10), (28, 4))
+2026-07-08 09:44:58,752 [INFO] root: No path found for gate ((33, 6), (52, 12))
+2026-07-08 09:45:00,528 [INFO] root: No path found for gate ((28, 4), (56, 12))
+2026-07-08 09:45:04,178 [INFO] root: No path found for gate ((21, 6), (68, 12))
+2026-07-08 09:45:07,033 [INFO] root: No path found for gate ((21, 6), (56, 12))
+2026-07-08 09:45:07,332 [INFO] root: No path found for gate ((21, 6), (56, 12))
+2026-07-08 09:45:09,234 [INFO] root: No path found for gate ((56, 12), (14, 8))
+2026-07-08 09:45:10,712 [INFO] root: No path found for gate ((39, 10), (68, 12))
+2026-07-08 09:45:11,070 [INFO] root: No path found for gate ((39, 10), (68, 12))
+2026-07-08 09:45:11,615 [INFO] root: No path found for gate ((68, 12), (14, 8))
+2026-07-08 09:45:12,687 [INFO] root: No path found for gate ((56, 12), (21, 6))
+2026-07-08 09:45:12,759 [INFO] root: No path found for gate ((52, 12), (33, 6))
+2026-07-08 09:45:12,821 [INFO] root: No path found for gate ((56, 12), (21, 6))
+2026-07-08 09:45:13,304 [INFO] root: No path found for gate ((59, 10), (28, 4))
+Len of schedule (fine grained):  145
+BENCH_RESULT seed=973316763 gates=1024 layers=145 seconds=48.3258
+number of data qubits:  128
+number of gates:  1024
+2026-07-08 09:46:43,857 [INFO] root: stim test succeeded for standard routing (:
+2026-07-08 09:46:43,861 [INFO] root: no duplicates found in standard routing (:
+2026-07-08 09:46:43,891 [INFO] root: paths do not occupy logical pos (:
+2026-07-08 09:46:43,893 [INFO] root: Reset times make sense, all good(:
+Len of schedule without teleportation:  154
+2026-07-08 09:46:48,944 [INFO] root: No path found for gate ((69, 14), (30, 8))
+2026-07-08 09:46:53,355 [INFO] root: No path found for gate ((69, 14), (40, 4))
+2026-07-08 09:46:54,963 [INFO] root: No path found for gate ((65, 14), (48, 4))
+2026-07-08 09:46:54,982 [INFO] root: No path found for gate ((69, 14), (30, 8))
+2026-07-08 09:47:12,346 [INFO] root: No path found for gate ((40, 4), (69, 14))
+2026-07-08 09:47:15,967 [INFO] root: No path found for gate ((20, 4), (65, 14))
+2026-07-08 09:47:16,458 [INFO] root: No path found for gate ((69, 14), (40, 4))
+2026-07-08 09:47:18,350 [INFO] root: No path found for gate ((69, 14), (36, 12))
+2026-07-08 09:47:18,757 [INFO] root: No path found for gate ((69, 14), (36, 12))
+2026-07-08 09:47:23,490 [INFO] root: No path found for gate ((16, 4), (65, 14))
+2026-07-08 09:47:25,174 [INFO] root: No path found for gate ((40, 4), (69, 14))
+2026-07-08 09:47:27,197 [INFO] root: No path found for gate ((40, 4), (69, 14))
+2026-07-08 09:47:27,497 [INFO] root: No path found for gate ((40, 4), (69, 14))
+2026-07-08 09:47:27,933 [INFO] root: No path found for gate ((69, 14), (36, 12))
+2026-07-08 09:47:29,593 [INFO] root: No path found for gate ((23, 2), (57, 14))
+2026-07-08 09:47:32,508 [INFO] root: No path found for gate ((69, 14), (40, 4))
+2026-07-08 09:47:34,420 [INFO] root: No path found for gate ((57, 14), (20, 4))
+2026-07-08 09:47:36,482 [INFO] root: No path found for gate ((20, 4), (65, 14))
+2026-07-08 09:47:37,195 [INFO] root: No path found for gate ((65, 14), (20, 4))
+Len of schedule (fine grained):  145
+BENCH_RESULT seed=88455461 gates=1024 layers=145 seconds=53.3471
+number of data qubits:  128
+number of gates:  1024
+2026-07-08 09:49:27,788 [INFO] root: stim test succeeded for standard routing (:
+2026-07-08 09:49:27,793 [INFO] root: no duplicates found in standard routing (:
+2026-07-08 09:49:27,840 [INFO] root: paths do not occupy logical pos (:
+2026-07-08 09:49:27,841 [INFO] root: Reset times make sense, all good(:
+Len of schedule without teleportation:  186
+2026-07-08 09:49:34,201 [INFO] root: No path found for gate ((37, 14), (8, 4))
+2026-07-08 09:49:41,092 [INFO] root: No path found for gate ((53, 14), (35, 10))
+2026-07-08 09:49:41,883 [INFO] root: No path found for gate ((53, 14), (35, 10))
+2026-07-08 09:49:49,137 [INFO] root: No path found for gate ((53, 14), (47, 2))
+2026-07-08 09:49:50,045 [INFO] root: No path found for gate ((8, 4), (37, 14))
+2026-07-08 09:49:53,791 [INFO] root: No path found for gate ((50, 0), (37, 14))
+2026-07-08 09:49:54,538 [INFO] root: No path found for gate ((50, 0), (37, 14))
+2026-07-08 09:49:59,242 [INFO] root: No path found for gate ((37, 14), (50, 0))
+2026-07-08 09:49:59,257 [INFO] root: No path found for gate ((53, 14), (47, 2))
+2026-07-08 09:50:04,065 [INFO] root: No path found for gate ((50, 0), (53, 14))
+2026-07-08 09:50:09,462 [INFO] root: No path found for gate ((54, 0), (53, 14))
+2026-07-08 09:50:12,813 [INFO] root: No path found for gate ((35, 10), (53, 14))
+2026-07-08 09:50:16,106 [INFO] root: No path found for gate ((48, 4), (37, 14))
+2026-07-08 09:50:16,122 [INFO] root: No path found for gate ((53, 14), (54, 0))
+2026-07-08 09:50:16,908 [INFO] root: No path found for gate ((53, 14), (47, 2))
+2026-07-08 09:50:17,437 [INFO] root: No path found for gate ((5, 6), (53, 14))
+2026-07-08 09:50:19,251 [INFO] root: No path found for gate ((50, 0), (53, 14))
+2026-07-08 09:50:20,082 [INFO] root: No path found for gate ((50, 0), (37, 14))
+2026-07-08 09:50:20,098 [INFO] root: No path found for gate ((5, 6), (53, 14))
+2026-07-08 09:50:21,046 [INFO] root: No path found for gate ((47, 2), (53, 14))
+2026-07-08 09:50:21,984 [INFO] root: No path found for gate ((47, 2), (37, 14))
+2026-07-08 09:50:22,260 [INFO] root: No path found for gate ((53, 14), (35, 10))
+2026-07-08 09:50:23,849 [INFO] root: No path found for gate ((37, 14), (48, 4))
+2026-07-08 09:50:24,507 [INFO] root: No path found for gate ((5, 6), (37, 14))
+2026-07-08 09:50:24,646 [INFO] root: No path found for gate ((8, 4), (53, 14))
+2026-07-08 09:50:25,014 [INFO] root: No path found for gate ((5, 6), (53, 14))
+2026-07-08 09:50:25,666 [INFO] root: No path found for gate ((47, 2), (37, 14))
+2026-07-08 09:50:26,182 [INFO] root: No path found for gate ((53, 14), (35, 10))
+2026-07-08 09:50:26,439 [INFO] root: No path found for gate ((50, 0), (37, 14))
+2026-07-08 09:50:26,493 [INFO] root: No path found for gate ((50, 0), (37, 14))
+Len of schedule (fine grained):  152
+BENCH_RESULT seed=580817535 gates=1024 layers=152 seconds=58.7932
+number of data qubits:  128
+number of gates:  1024
+2026-07-08 09:52:05,460 [INFO] root: stim test succeeded for standard routing (:
+2026-07-08 09:52:05,464 [INFO] root: no duplicates found in standard routing (:
+2026-07-08 09:52:05,508 [INFO] root: paths do not occupy logical pos (:
+2026-07-08 09:52:05,509 [INFO] root: Reset times make sense, all good(:
+Len of schedule without teleportation:  167
+2026-07-08 09:52:19,486 [INFO] root: No path found for gate ((15, 2), (53, 6))
+2026-07-08 09:52:21,499 [INFO] root: No path found for gate ((11, 10), (16, 4))
+2026-07-08 09:52:25,257 [INFO] root: No path found for gate ((20, 4), (11, 10))
+2026-07-08 09:52:30,373 [INFO] root: No path found for gate ((40, 4), (11, 10))
+2026-07-08 09:52:36,179 [INFO] root: No path found for gate ((53, 6), (57, 14))
+2026-07-08 09:52:39,027 [INFO] root: No path found for gate ((51, 10), (16, 4))
+2026-07-08 09:52:40,299 [INFO] root: No path found for gate ((20, 4), (51, 10))
+2026-07-08 09:52:44,745 [INFO] root: No path found for gate ((57, 14), (53, 6))
+2026-07-08 09:52:46,837 [INFO] root: No path found for gate ((16, 4), (51, 10))
+2026-07-08 09:52:47,343 [INFO] root: No path found for gate ((59, 10), (53, 6))
+2026-07-08 09:52:48,527 [INFO] root: No path found for gate ((57, 14), (43, 2))
+2026-07-08 09:52:51,070 [INFO] root: No path found for gate ((59, 10), (53, 6))
+2026-07-08 09:52:53,147 [INFO] root: No path found for gate ((59, 10), (53, 6))
+2026-07-08 09:52:54,601 [INFO] root: No path found for gate ((11, 10), (40, 4))
+2026-07-08 09:52:56,662 [INFO] root: No path found for gate ((20, 4), (51, 10))
+2026-07-08 09:52:56,901 [INFO] root: No path found for gate ((20, 4), (51, 10))
+2026-07-08 09:52:59,829 [INFO] root: No path found for gate ((20, 4), (51, 10))
+2026-07-08 09:53:00,401 [INFO] root: No path found for gate ((11, 10), (20, 4))
+2026-07-08 09:53:03,452 [INFO] root: No path found for gate ((43, 2), (13, 6))
+2026-07-08 09:53:04,527 [INFO] root: No path found for gate ((43, 2), (57, 14))
+Len of schedule (fine grained):  146
+BENCH_RESULT seed=991114146 gates=1024 layers=146 seconds=59.0341
+number of data qubits:  128
+number of gates:  1024
+2026-07-08 09:54:35,571 [INFO] root: stim test succeeded for standard routing (:
+2026-07-08 09:54:35,574 [INFO] root: no duplicates found in standard routing (:
+2026-07-08 09:54:35,604 [INFO] root: paths do not occupy logical pos (:
+2026-07-08 09:54:35,606 [INFO] root: Reset times make sense, all good(:
+Len of schedule without teleportation:  153
+2026-07-08 09:54:48,036 [INFO] root: No path found for gate ((45, 14), (28, 4))
+2026-07-08 09:54:48,045 [INFO] root: No path found for gate ((49, 14), (34, 8))
+2026-07-08 09:54:48,994 [INFO] root: No path found for gate ((49, 14), (34, 8))
+2026-07-08 09:55:02,155 [INFO] root: No path found for gate ((49, 14), (34, 8))
+2026-07-08 09:55:04,056 [INFO] root: No path found for gate ((45, 14), (28, 4))
+2026-07-08 09:55:11,103 [INFO] root: No path found for gate ((45, 14), (12, 4))
+2026-07-08 09:55:15,560 [INFO] root: No path found for gate ((45, 14), (12, 4))
+2026-07-08 09:55:17,953 [INFO] root: No path found for gate ((49, 14), (34, 8))
+2026-07-08 09:55:21,983 [INFO] root: No path found for gate ((17, 6), (49, 14))
+2026-07-08 09:55:31,120 [INFO] root: No path found for gate ((45, 14), (28, 4))
+2026-07-08 09:55:31,133 [INFO] root: No path found for gate ((17, 6), (49, 14))
+2026-07-08 09:55:31,816 [INFO] root: No path found for gate ((28, 4), (45, 14))
+2026-07-08 09:55:32,198 [INFO] root: No path found for gate ((45, 14), (35, 2))
+2026-07-08 09:55:32,507 [INFO] root: No path found for gate ((49, 14), (8, 4))
+Len of schedule (fine grained):  139
+BENCH_RESULT seed=964501795 gates=1024 layers=139 seconds=57.3203
+number of data qubits:  128
+number of gates:  1024
+2026-07-08 09:57:09,112 [INFO] root: stim test succeeded for standard routing (:
+2026-07-08 09:57:09,117 [INFO] root: no duplicates found in standard routing (:
+2026-07-08 09:57:09,164 [INFO] root: paths do not occupy logical pos (:
+2026-07-08 09:57:09,166 [INFO] root: Reset times make sense, all good(:
+Len of schedule without teleportation:  160
+2026-07-08 09:57:17,414 [INFO] root: No path found for gate ((45, 14), (16, 4))
+2026-07-08 09:57:31,884 [INFO] root: No path found for gate ((56, 12), (17, 6))
+2026-07-08 09:57:37,906 [INFO] root: No path found for gate ((23, 10), (24, 4))
+2026-07-08 09:57:43,963 [INFO] root: No path found for gate ((45, 14), (24, 4))
+2026-07-08 09:57:49,411 [INFO] root: No path found for gate ((45, 14), (24, 4))
+2026-07-08 09:57:50,634 [INFO] root: No path found for gate ((47, 10), (24, 4))
+2026-07-08 09:57:50,670 [INFO] root: No path found for gate ((45, 14), (16, 4))
+2026-07-08 09:57:54,833 [INFO] root: No path found for gate ((23, 10), (16, 4))
+2026-07-08 09:57:59,105 [INFO] root: No path found for gate ((45, 14), (16, 4))
+2026-07-08 09:58:01,551 [INFO] root: No path found for gate ((47, 10), (24, 4))
+2026-07-08 09:58:05,095 [INFO] root: No path found for gate ((47, 10), (16, 4))
+2026-07-08 09:58:06,881 [INFO] root: No path found for gate ((24, 4), (45, 14))
+2026-07-08 09:58:07,056 [INFO] root: No path found for gate ((24, 4), (45, 14))
+2026-07-08 09:58:10,522 [INFO] root: No path found for gate ((45, 14), (24, 4))
+2026-07-08 09:58:10,698 [INFO] root: No path found for gate ((45, 14), (24, 4))
+Len of schedule (fine grained):  142
+BENCH_RESULT seed=889112014 gates=1024 layers=142 seconds=61.6552
+number of data qubits:  128
+number of gates:  1024
+2026-07-08 09:59:51,182 [INFO] root: stim test succeeded for standard routing (:
+2026-07-08 09:59:51,191 [INFO] root: no duplicates found in standard routing (:
+2026-07-08 09:59:51,224 [INFO] root: paths do not occupy logical pos (:
+2026-07-08 09:59:51,228 [INFO] root: Reset times make sense, all good(:
+Len of schedule without teleportation:  174
+2026-07-08 09:59:52,087 [INFO] root: No path found for gate ((22, 0), (38, 8))
+2026-07-08 10:00:00,033 [INFO] root: No path found for gate ((22, 0), (38, 8))
+2026-07-08 10:00:00,096 [INFO] root: No path found for gate ((9, 14), (30, 0))
+2026-07-08 10:00:04,555 [INFO] root: No path found for gate ((60, 12), (30, 0))
+2026-07-08 10:00:06,719 [INFO] root: No path found for gate ((14, 0), (37, 14))
+2026-07-08 10:00:14,554 [INFO] root: No path found for gate ((15, 2), (30, 8))
+2026-07-08 10:00:21,596 [INFO] root: No path found for gate ((60, 12), (22, 0))
+2026-07-08 10:00:25,854 [INFO] root: No path found for gate ((28, 4), (9, 14))
+2026-07-08 10:00:25,862 [INFO] root: No path found for gate ((37, 14), (30, 8))
+2026-07-08 10:00:28,302 [INFO] root: No path found for gate ((9, 14), (22, 0))
+2026-07-08 10:00:30,533 [INFO] root: No path found for gate ((14, 0), (15, 2))
+2026-07-08 10:00:33,055 [INFO] root: No path found for gate ((9, 14), (30, 0))
+2026-07-08 10:00:33,428 [INFO] root: No path found for gate ((9, 14), (30, 0))
+2026-07-08 10:00:34,348 [INFO] root: No path found for gate ((30, 0), (60, 12))
+2026-07-08 10:00:36,621 [INFO] root: No path found for gate ((9, 14), (28, 4))
+2026-07-08 10:00:39,268 [INFO] root: No path found for gate ((15, 2), (46, 0))
+2026-07-08 10:00:39,293 [INFO] root: No path found for gate ((38, 8), (22, 0))
+2026-07-08 10:00:40,694 [INFO] root: No path found for gate ((9, 14), (22, 0))
+2026-07-08 10:00:42,444 [INFO] root: No path found for gate ((22, 0), (45, 6))
+2026-07-08 10:00:42,468 [INFO] root: No path found for gate ((60, 12), (30, 0))
+2026-07-08 10:00:43,018 [INFO] root: No path found for gate ((37, 14), (38, 8))
+2026-07-08 10:00:43,551 [INFO] root: No path found for gate ((14, 0), (19, 10))
+2026-07-08 10:00:43,565 [INFO] root: No path found for gate ((22, 0), (60, 12))
+2026-07-08 10:00:43,826 [INFO] root: No path found for gate ((38, 8), (15, 2))
+2026-07-08 10:00:44,728 [INFO] root: No path found for gate ((22, 0), (30, 8))
+2026-07-08 10:00:46,939 [INFO] root: No path found for gate ((9, 14), (30, 0))
+2026-07-08 10:00:47,218 [INFO] root: No path found for gate ((9, 14), (30, 0))
+2026-07-08 10:00:48,257 [INFO] root: No path found for gate ((60, 12), (22, 0))
+2026-07-08 10:00:48,271 [INFO] root: No path found for gate ((28, 4), (9, 14))
+2026-07-08 10:00:48,413 [INFO] root: No path found for gate ((28, 4), (9, 14))
+2026-07-08 10:00:48,812 [INFO] root: No path found for gate ((9, 14), (30, 0))
+2026-07-08 10:00:48,926 [INFO] root: No path found for gate ((9, 14), (30, 0))
+2026-07-08 10:00:50,225 [INFO] root: No path found for gate ((30, 0), (30, 8))
+2026-07-08 10:00:50,243 [INFO] root: No path found for gate ((19, 10), (46, 0))
+2026-07-08 10:00:50,430 [INFO] root: No path found for gate ((19, 10), (46, 0))
+2026-07-08 10:00:51,447 [INFO] root: No path found for gate ((9, 14), (28, 4))
+2026-07-08 10:00:52,631 [INFO] root: No path found for gate ((30, 0), (60, 12))
+2026-07-08 10:00:52,846 [INFO] root: No path found for gate ((30, 0), (60, 12))
+2026-07-08 10:00:52,854 [INFO] root: No path found for gate ((22, 0), (9, 14))
+2026-07-08 10:00:53,467 [INFO] root: No path found for gate ((38, 8), (30, 0))
+2026-07-08 10:00:53,481 [INFO] root: No path found for gate ((37, 14), (14, 0))
+2026-07-08 10:00:54,070 [INFO] root: No path found for gate ((9, 14), (30, 0))
+2026-07-08 10:00:54,465 [INFO] root: No path found for gate ((22, 0), (60, 12))
+Len of schedule (fine grained):  159
+BENCH_RESULT seed=527718978 gates=1024 layers=159 seconds=63.5100
+number of data qubits:  128
+number of gates:  1024
+2026-07-08 10:02:41,573 [INFO] root: stim test succeeded for standard routing (:
+2026-07-08 10:02:41,582 [INFO] root: no duplicates found in standard routing (:
+2026-07-08 10:02:41,634 [INFO] root: paths do not occupy logical pos (:
+2026-07-08 10:02:41,638 [INFO] root: Reset times make sense, all good(:
+Len of schedule without teleportation:  180
+2026-07-08 10:02:53,467 [INFO] root: No path found for gate ((63, 10), (37, 14))
+2026-07-08 10:02:54,638 [INFO] root: No path found for gate ((22, 8), (45, 14))
+2026-07-08 10:02:55,576 [INFO] root: No path found for gate ((22, 8), (45, 14))
+2026-07-08 10:03:10,469 [INFO] root: No path found for gate ((24, 4), (37, 14))
+2026-07-08 10:03:11,309 [INFO] root: No path found for gate ((45, 14), (15, 10))
+2026-07-08 10:03:14,658 [INFO] root: No path found for gate ((22, 8), (45, 14))
+2026-07-08 10:03:15,377 [INFO] root: No path found for gate ((22, 8), (45, 14))
+2026-07-08 10:03:24,000 [INFO] root: No path found for gate ((64, 12), (45, 14))
+2026-07-08 10:03:27,882 [INFO] root: No path found for gate ((45, 14), (22, 8))
+2026-07-08 10:03:29,363 [INFO] root: No path found for gate ((22, 8), (45, 14))
+2026-07-08 10:03:34,867 [INFO] root: No path found for gate ((22, 8), (45, 14))
+2026-07-08 10:03:37,054 [INFO] root: No path found for gate ((45, 14), (22, 8))
+2026-07-08 10:03:38,881 [INFO] root: No path found for gate ((45, 14), (34, 0))
+2026-07-08 10:03:41,084 [INFO] root: No path found for gate ((64, 12), (24, 4))
+2026-07-08 10:03:41,933 [INFO] root: No path found for gate ((30, 0), (45, 14))
+2026-07-08 10:03:43,110 [INFO] root: No path found for gate ((45, 14), (16, 4))
+2026-07-08 10:03:44,332 [INFO] root: No path found for gate ((22, 8), (45, 14))
+Len of schedule (fine grained):  143
+BENCH_RESULT seed=235259617 gates=1024 layers=143 seconds=62.8235

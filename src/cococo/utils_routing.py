@@ -960,7 +960,7 @@ class BasicRouter:
                 "No phase assignment satisfies the two-phase disjointness constraints.",
             )
 
-        # 5. Materialise concrete ancilla indices and first_part for every gate.
+        # 5. Materialise concrete ancilla indices and first_part for gate in local overlap graph
         updated: dict[Gate, RouteInfo] = {}
         for g in gates:
             opt = chosen[g]
@@ -1218,15 +1218,18 @@ class BasicRouter:
         
 
         if testing:
-            if tst.test_duplicate_nodes_fg(self.routes_by_layer):
-                logger.info("Successful fine grained routing")
-            else:
-                logger.info("Problematic! Nodes are used by two paths")
-
             if tst.check_order_dyn_gates_fg(terminal_pairs, self.routes_by_layer, layout = layout):
                 logger.info("stim test succeeded for fine grained routing (:")
             else:
                 logger.info("stim test failed - THERE IS A PROBLEM!")
+
+            if tst.test_duplicate_nodes_fg(self.routes_by_layer):
+                logger.info("no duplicate nodes in fine grained routing (:")
+            else:
+                logger.info("Problematic! Nodes are used by two paths")
+
+            if tst.check_path_on_logical_fg(self.routes_by_layer, layout = layout):
+                logger.info("paths do not occupy logical pos (:")
 
 
     def push_remainder_into_layers(

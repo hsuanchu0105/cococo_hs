@@ -1,4 +1,6 @@
 import sys
+import os
+import time
 from pathlib import Path
 
 project_root = Path.cwd().parent
@@ -17,11 +19,11 @@ import cococo.dag_helper as dag_helper
 
 from datetime import datetime
 
-seed = 45
+seed = int(sys.argv[1]) if len(sys.argv) > 1 else 45
 
-layout_type = "triple"
-m = 4
-n = 4
+layout_type = "single"
+m = 8
+n = 16
 factories = []
 remove_edges = False
 g, data_qubit_locs, factory_ring = layouts.gen_layout_scalable(layout_type, m, n, factories, remove_edges)
@@ -34,7 +36,7 @@ t=2
 q = len(data_qubit_locs)
 print("number of data qubits: ", q)
 j = 8
-num_gates = 2 * q
+num_gates = 8 * q
 
 
 # j gates per layer on q qubits 
@@ -89,26 +91,43 @@ while i < len(layers):
     i += 1
 
 """
+# When benchmarking (BENCH=1) skip the stim correctness check and the animation
+# so the timing reflects the routing itself.
+bench = os.environ.get("BENCH") == "1"
+
+t_start = time.perf_counter()
 router.find_total_fine_grained_vdp_dyn(layers, None, None, layout = layout, overlap_type = "strict_k", testing = True)
+elapsed = time.perf_counter() - t_start
 #print(router.overlap_graphs.values())
 #print(router.routes_by_layer)
 
 
-    
+
 
 print("Len of schedule (fine grained): ", len(router.routes_by_layer))
 
+# reduction of schedule length vs the non-fine-grained (coarse VDP) schedule
+baseline_len = len(vdp_layers)
+fg_len = len(router.routes_by_layer)
+reduction = (baseline_len - fg_len) / baseline_len * 100 if baseline_len else 0.0
+
+# machine-parseable line for the benchmark harness to collect
+print(f"BENCH_RESULT seed={seed} gates={len(terminal_pairs)} "
+      f"baseline={baseline_len} layers={fg_len} red={reduction:.2f} "
+      f"seconds={elapsed:.4f}")
+
 #plot_fine_routes(g, router.routes_by_layer)
 
-Path("animation").mkdir(exist_ok=True)
-filename = f"../../Output_Files/animation/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.html"
+if not bench:
+    Path("animation").mkdir(exist_ok=True)
+    filename = f"../../Output_Files/animation/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.html"
 
-animate_fine_routes(
-    graph=router.g,
-    routes_by_layer=router.routes_by_layer,
-    interval=800,
-    pause_between_layers=0,
-    save_path=filename, 
-    figsize=(18, 8),
-)
+    animate_fine_routes(
+        graph=router.g,
+        routes_by_layer=router.routes_by_layer,
+        interval=800,
+        pause_between_layers=0,
+        save_path=filename,
+        figsize=(18, 8),
+    )
 
