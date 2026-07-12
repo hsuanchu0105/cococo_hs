@@ -1207,3 +1207,423 @@ def animate_fine_routes(
     plt.close(fig)
 
     return anim
+
+
+# ---------------------------------------------------------------------------
+# Combined animation: fine-grained two-phase routing + SA teleportation
+#
+# Consumes a schedule from optimize_layers(..., vdp_type="fine_grained"), whose
+# entries carry both the coarse teleport info (steiner / idle_teleport /
+# vdp_dict with idle_back) and the per-layer RouteInfo dict under "fine_routes".
+# Each schedule layer is shown as two sub-frames:
+#   frame A ("routes"): the two-phase routing picture, C -> ancilla -> T
+#   frame B ("moves") : the steiner branches, idle teleports and move labels
+# (frame B is skipped for layers without any move). Qubit relocation becomes
+# visible in the NEXT layer's frame A, exactly like the coarse animation.
+# ---------------------------------------------------------------------------
+
+
+def _save_animation(anim: FuncAnimation, save_path: str | Path, interval: int):
+    """Shared .html/.gif/.mp4 save handling (same rules as animate_fine_routes)."""
+    save_path = str(save_path)
+    suffix = Path(save_path).suffix.lower()
+    fps = max(1, 1000 // interval)
+
+    if suffix == ".gif":
+        anim.save(save_path, writer=PillowWriter(fps=fps))
+    elif suffix == ".mp4":
+        anim.save(save_path, writer=FFMpegWriter(fps=fps))
+    elif suffix == ".html":
+        with open(save_path, "w", encoding="utf-8") as f:
+            f.write(anim.to_jshtml())
+    else:
+        raise ValueError(
+            "save_path must end with '.html', '.gif', or '.mp4'. "
+            f"Got: {save_path}"
+        )
+
+
+def _draw_fine_sa_frame(
+    ax: plt.Axes,
+    g: nx.Graph,
+    frame: DisplayFrame,
+    fine_routes: dict | None,
+    sub: str,
+    *,
+    factories: list[Pos] | set[Pos] | None = None,
+    title_prefix: str = "Fine-grained lattice-surgery routing + teleportation",
+    show_active_labels: bool = True,
+    show_move_text: bool = True,
+):
+    """
+    Draw one sub-frame of the combined fine-grained + SA animation.
+
+    `sub` == "routes": phase-1 subpaths (limegreen solid), phase-2 subpaths
+    (blue dashed), orange ancilla dots and C/T endpoint markers.
+
+    `sub` == "moves": the same routes dimmed gray for context, the steiner
+    branches (faint red) with the SA-chosen T-junction (black diamond when it
+    differs from the committed ancilla, orange diamond with black edge when
+    they coincide), idle teleports/move-backs (gold dashed), src/dst rings and
+    the move-label text box. Qubits are drawn at their pre-move positions;
+    the next layer's "routes" frame shows them at the new positions.
+    """
+    factories = list(factories or [])
+
+    graph_pos = nx.get_node_attributes(g, "pos")
+    if not graph_pos:
+        graph_pos = {node: node for node in g.nodes}
+
+    def xy(node):
+        p = graph_pos.get(node, node)
+        return p[0], p[1]
+
+    used_labels: set[str] = set()
+
+    def label_once(label: str) -> str | None:
+        if label in used_labels:
+            return None
+        used_labels.add(label)
+        return label
+
+    def draw_segments(path, *, color, linewidth, alpha, linestyle, zorder, label=None, node_dots=False):
+        if not path or len(path) == 0:
+            return
+        for u, v in zip(path[:-1], path[1:]):
+            x0, y0 = xy(u)
+            x1, y1 = xy(v)
+            ax.plot(
+                [x0, x1],
+                [y0, y1],
+                color=color,
+                linewidth=linewidth,
+                alpha=alpha,
+                linestyle=linestyle,
+                solid_capstyle="round",
+                zorder=zorder,
+                label=label_once(label) if label else None,
+            )
+        if node_dots:
+            xs, ys = zip(*(xy(node) for node in path))
+            ax.scatter(xs, ys, color=color, s=20, alpha=alpha, zorder=zorder + 1)
+
+    ax.clear()
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    subtitle = (
+        "routing (phase 1 solid green, phase 2 dashed blue)"
+        if sub == "routes"
+        else "teleportation"
+    )
+    ax.set_title(
+        f"{title_prefix}\nLayer {frame.layer_idx + 1} — {subtitle}",
+        fontsize=18,
+    )
+
+    # ------------------------------------------------------------------
+    # 1. Background lattice + factories (same style as _draw_clean_layer)
+    # ------------------------------------------------------------------
+    nx.draw_networkx_edges(
+        g, graph_pos, ax=ax, width=0.7, alpha=0.25, edge_color="lightblue"
+    )
+    nx.draw_networkx_nodes(
+        g, graph_pos, ax=ax, node_size=105, node_color="lightgray",
+        edgecolors="none", alpha=0.95,
+    )
+    if factories:
+        factory_nodes = [f for f in factories if f in g.nodes()]
+        nx.draw_networkx_nodes(
+            g, graph_pos, ax=ax, nodelist=factory_nodes, node_size=150,
+            node_shape="s", node_color="gray", edgecolors="black", linewidths=1.2,
+        )
+
+    # ------------------------------------------------------------------
+    # 2. The routed paths of this layer
+    # ------------------------------------------------------------------
+    fine_routes = fine_routes or {}
+    active_qids: set[int] = set()
+
+    if sub == "routes":
+        # two-phase fine routes
+        for gate, ri in fine_routes.items():
+            draw_segments(
+                ri.subpath1, color="limegreen", linewidth=3.0, alpha=0.95,
+                linestyle="-", zorder=4, label="phase 1", node_dots=True,
+            )
+            draw_segments(
+                ri.subpath2, color="blue", linewidth=2.2, alpha=0.95,
+                linestyle="--", zorder=5, label="phase 2", node_dots=True,
+            )
+        # fallback for layers routed without fine info (e.g. idle-only layers)
+        if not fine_routes:
+            for key, path in frame.vdp_dict.items():
+                if _is_idle_back_key(key):
+                    continue
+                draw_segments(
+                    list(path), color="red", linewidth=2.8, alpha=0.8,
+                    linestyle="-", zorder=4,
+                )
+    else:  # "moves": routes dimmed gray for spatial context
+        for gate, ri in fine_routes.items():
+            draw_segments(
+                list(ri.path), color="gray", linewidth=2.5, alpha=0.25,
+                linestyle="-", zorder=3,
+            )
+        if not fine_routes:
+            for key, path in frame.vdp_dict.items():
+                if _is_idle_back_key(key):
+                    continue
+                draw_segments(
+                    list(path), color="gray", linewidth=2.5, alpha=0.25,
+                    linestyle="-", zorder=3,
+                )
+
+    # ------------------------------------------------------------------
+    # 3. Moves: steiner branches, idle paths, junction markers ("moves" only)
+    # ------------------------------------------------------------------
+    idle_moves = [
+        mv for mv in frame.move_events if mv.kind in {"idle_back", "idle_teleport"}
+    ]
+    steiner_moves = [mv for mv in frame.move_events if mv.kind == "steiner"]
+
+    if sub == "moves":
+        # steiner branch (path_steiner only; the route itself is already dimmed)
+        if frame.steiner:
+            for key, tree_paths in frame.steiner.items():
+                if _is_special_idle_key(key):
+                    continue
+                _p1, p_branch = tree_paths
+                if p_branch:
+                    draw_segments(
+                        list(p_branch), color="red", linewidth=4.0, alpha=0.4,
+                        linestyle="-", zorder=6, label="steiner branch",
+                    )
+                # T-junction marker for CNOT trees: (a, b, terminal)
+                junction = p_branch[0] if p_branch else None
+                ri = (
+                    fine_routes.get((key[0], key[1]))
+                    if len(key) == 3
+                    else None
+                )
+                if junction is not None and ri is not None:
+                    jx, jy = xy(junction)
+                    if junction != ri.ancilla:
+                        ax.scatter(
+                            [jx], [jy], color="black", s=100, marker="D",
+                            zorder=9, label=label_once("T-junction"),
+                        )
+                    else:  # combined marker: junction sits on the ancilla
+                        ax.scatter(
+                            [jx], [jy], color="orange", s=110, marker="D",
+                            edgecolors="black", linewidths=1.4, zorder=9,
+                            label=label_once("T-junction = ancilla"),
+                        )
+
+        for mv in idle_moves:
+            draw_segments(
+                mv.path, color="gold", linewidth=4.0, alpha=0.95,
+                linestyle="--", zorder=6, label="idle move",
+            )
+
+    # ------------------------------------------------------------------
+    # 4. Ancilla markers (both sub-frames; context dots in "moves")
+    # ------------------------------------------------------------------
+    for gate, ri in fine_routes.items():
+        axy = xy(ri.ancilla)
+        ax.scatter(
+            [axy[0]], [axy[1]], color="orange",
+            s=90 if sub == "routes" else 60,
+            edgecolors="black", linewidths=0.8, zorder=8,
+            label=label_once("ancilla"),
+        )
+
+    # ------------------------------------------------------------------
+    # 5. Logical/data qubits (pre-move positions) + C/T endpoint markers
+    # ------------------------------------------------------------------
+    data_nodes = [p for p in frame.layout_current.values() if p in g.nodes()]
+    nx.draw_networkx_nodes(
+        g, graph_pos, ax=ax, nodelist=data_nodes, node_size=210,
+        node_color="white", edgecolors="limegreen", linewidths=2.2,
+    )
+    nx.draw_networkx_nodes(
+        g, graph_pos, ax=ax, nodelist=data_nodes, node_size=85,
+        node_color="gray", edgecolors="none", alpha=0.95,
+    )
+
+    if sub == "routes":
+        for gate, _ri in fine_routes.items():
+            control, target = gate
+            cx, cy = xy(control)
+            tx, ty = xy(target)
+            ax.scatter(
+                [cx], [cy], color="red", s=120, edgecolors="black",
+                linewidths=1.0, zorder=10, label=label_once("control"),
+            )
+            ax.text(cx + 0.12, cy + 0.12, "C", fontsize=10, zorder=11)
+            ax.scatter(
+                [tx], [ty], color="purple", s=120, edgecolors="black",
+                linewidths=1.0, zorder=10, label=label_once("target"),
+            )
+            ax.text(tx + 0.12, ty + 0.12, "T", fontsize=10, zorder=11)
+
+    # ------------------------------------------------------------------
+    # 6. src/dst rings + active labels ("moves" only)
+    # ------------------------------------------------------------------
+    if sub == "moves":
+        for mv in idle_moves:
+            if mv.logical_id is not None:
+                active_qids.add(mv.logical_id)
+            for special_node in [mv.src, mv.dst]:
+                if special_node in g.nodes():
+                    nx.draw_networkx_nodes(
+                        g, graph_pos, ax=ax, nodelist=[special_node],
+                        node_size=310, node_color="none",
+                        edgecolors="gold", linewidths=3.0,
+                    )
+        for mv in steiner_moves:
+            if mv.logical_id is not None:
+                active_qids.add(mv.logical_id)
+            for special_node in [mv.src, mv.dst]:
+                if special_node in g.nodes():
+                    nx.draw_networkx_nodes(
+                        g, graph_pos, ax=ax, nodelist=[special_node],
+                        node_size=285, node_color="none",
+                        edgecolors="black", linewidths=2.0,
+                    )
+
+        if show_active_labels and active_qids:
+            labels = {
+                qpos: f"q{qid}"
+                for qid, qpos in frame.layout_current.items()
+                if qid in active_qids and qpos in g.nodes()
+            }
+            nx.draw_networkx_labels(
+                g, graph_pos, labels=labels, ax=ax, font_size=9,
+                font_weight="bold",
+            )
+
+    # ------------------------------------------------------------------
+    # 7. Legend + move-text box (always expand ylim so frames don't jump)
+    # ------------------------------------------------------------------
+    handles, _labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(loc="upper right", fontsize=9)
+
+    if show_move_text:
+        if sub == "moves":
+            text = "\n".join(mv.label for mv in frame.move_events)
+        elif frame.move_events:
+            n = len(frame.move_events)
+            text = f"{n} teleportation move(s) in this layer — shown in next frame"
+        else:
+            text = "No logical-qubit relocation in this layer"
+
+        x_min, x_max = ax.get_xlim()
+        y_min, y_max = ax.get_ylim()
+        y_range = y_max - y_min
+        ax.set_ylim(y_min - 0.22 * y_range, y_max)
+        ax.text(
+            x_min,
+            y_min - 0.08 * y_range,
+            text,
+            fontsize=10,
+            ha="left",
+            va="top",
+            bbox=dict(
+                boxstyle="round",
+                facecolor="white",
+                edgecolor="lightgray",
+                alpha=0.92,
+            ),
+            zorder=100,
+        )
+
+
+def make_fine_sa_routing_animation(
+    g: nx.Graph,
+    schedule: list[dict[str, Any]],
+    *,
+    initial_layout: dict[int, Pos] | None = None,
+    factories: list[Pos] | set[Pos] | None = None,
+    figsize: tuple[float, float] = (18, 8),
+    interval: int = 900,
+    title_prefix: str = "Fine-grained lattice-surgery routing + teleportation",
+    show_active_labels: bool = True,
+    show_move_text: bool = True,
+    embed_limit_mb: int = 100,
+    save_path: str | Path | None = None,
+):
+    """
+    Combined animation for schedules from optimize_layers(vdp_type="fine_grained").
+
+    Two sub-frames per schedule layer:
+      frame A "routing":
+        - limegreen solid : phase-1 subpath of each route
+        - blue dashed     : phase-2 subpath
+        - orange dot      : committed ancilla (phase split point)
+        - red C / purple T: gate endpoints
+      frame B "teleportation" (skipped for layers without moves):
+        - gray            : this layer's routes, dimmed, for context
+        - faint red       : steiner branch (junction -> new terminal)
+        - black diamond   : SA-chosen T-junction (orange diamond with black
+                            edge when it coincides with the ancilla)
+        - gold dashed     : idle teleport / idle move-back
+        - black/gold rings: teleport / idle source & destination
+        - text box        : one label per move
+    The qubits are drawn at their pre-move positions in both sub-frames; the
+    next layer's frame A shows them at the new positions.
+
+    save_path may end with .html, .gif or .mp4.
+    """
+    mpl.rcParams["animation.embed_limit"] = embed_limit_mb
+
+    if not any(entry.get("fine_routes") for entry in schedule):
+        raise ValueError(
+            "No schedule entry carries 'fine_routes'. This animation needs a "
+            "schedule from optimize_layers(..., vdp_type='fine_grained'); for "
+            "coarse schedules use make_clean_routing_html_animation."
+        )
+
+    layer_frames = build_layer_frames(schedule, initial_layout=initial_layout)
+    display_frames = build_display_frames(layer_frames)
+
+    # sub-frame sequence: (display_frame, fine_routes, "routes"/"moves")
+    seq: list[tuple[DisplayFrame, dict | None, str]] = []
+    for frame, entry in zip(display_frames, schedule):
+        fine_routes = entry.get("fine_routes")
+        seq.append((frame, fine_routes, "routes"))
+        if frame.move_events:
+            seq.append((frame, fine_routes, "moves"))
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    def update(k: int):
+        frame, fine_routes, sub = seq[k]
+        _draw_fine_sa_frame(
+            ax,
+            g,
+            frame,
+            fine_routes,
+            sub,
+            factories=factories,
+            title_prefix=title_prefix,
+            show_active_labels=show_active_labels,
+            show_move_text=show_move_text,
+        )
+
+    anim = FuncAnimation(
+        fig,
+        update,
+        frames=len(seq),
+        interval=interval,
+        repeat=True,
+        blit=False,
+    )
+
+    if save_path is not None:
+        _save_animation(anim, save_path, interval)
+
+    plt.close(fig)
+
+    return anim

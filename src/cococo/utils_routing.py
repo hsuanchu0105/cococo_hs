@@ -50,6 +50,12 @@ class RouteInfo:
     path: tuple[pos, ...]
     ancilla_idx: int
     first_part: FirstPart = "control"
+    # Allowed steiner T-junction index range [junction_lo, junction_hi] on `path`:
+    # the overlap-free region containing the committed ancilla. Filled by
+    # find_fine_grained_vdp once the layer's routing is final (paths/overlaps are
+    # stable only then); None before that / on routes from older pickles.
+    junction_lo: int | None = None
+    junction_hi: int | None = None
 
     @property
     def ancilla(self) -> pos:
@@ -131,6 +137,9 @@ class BasicRouter:
         self.node_to_gates_by_layer: dict[int, dict[pos, set[Gate]]] = defaultdict(
             lambda: defaultdict(set)
         )
+        # allowed steiner T-junction nodes per gate for fine-grained routing;
+        # None in coarse mode (set by initialize_steiner, consumed by perturbation)
+        self.fine_allowed_junctions: dict[Gate, set[pos]] | None = None
 
     
     @staticmethod
@@ -839,6 +848,57 @@ class BasicRouter:
         hi = (path_len - 2) if region == m else blocks[region]["start"] - 1
         return lo, hi
 
+    @staticmethod
+    def _overlap_blocks_from_nodes(
+        path: list[pos],
+        other_nodes: set[pos],
+    ) -> list[dict]:
+        """
+        Overlap blocks of `path` against `other_nodes` (nodes of all other paths).
+
+        Returns the maximal runs of consecutive interior indices i (1..len-2) with
+        path[i] in other_nodes, as sorted {"start", "end"} dicts. Mirrors the block
+        semantics of `_check_validity_strict_k` but unions all neighbors: the gaps
+        outside every block are identical either way.
+        """
+        blocks = []
+        start = None
+        for i in range(1, len(path) - 1):
+            if path[i] in other_nodes:
+                if start is None:
+                    start = i
+            elif start is not None:
+                blocks.append({"start": start, "end": i - 1})
+                start = None
+        if start is not None:
+            blocks.append({"start": start, "end": len(path) - 2})
+        return blocks
+
+    def _fine_junction_bounds(
+        self,
+        route_info: RouteInfo,
+        other_nodes: set[pos],
+    ) -> tuple[int, int]:
+        """
+        Inclusive [lo, hi] path-index range where a steiner T-junction may attach
+        for a fine-grained route: the region (gap between overlap blocks) that
+        contains the committed ancilla. A committed route always has its ancilla
+        outside every overlap block (enforced via check_validity/_commit_component),
+        so lo <= ancilla_idx <= hi always holds; with no overlaps this degenerates
+        to the whole interior [1, len-2].
+        """
+        path = list(route_info.path)
+        blocks = self._overlap_blocks_from_nodes(path, other_nodes)
+        a_idx = route_info.ancilla_idx
+        assert all(a_idx < b["start"] or a_idx > b["end"] for b in blocks), (
+            f"Committed ancilla_idx {a_idx} lies inside an overlap block "
+            f"for gate {route_info.gate}."
+        )
+        region = sum(1 for b in blocks if b["end"] < a_idx)
+        lo, hi = self._ancilla_region_bounds(len(path), blocks, region)
+        assert lo <= a_idx <= hi, "internal error: ancilla outside its region bounds"
+        return lo, hi
+
     def _check_validity_strict_k(
         self,
         local_og: nx.Graph,
@@ -1135,9 +1195,24 @@ class BasicRouter:
                     )
                     remainder_terminal_pairs.append(gate)
                         
-            else:   
+            else:
                 paths_current_layer.append(path)
                 self.commit_route(layer_idx, route_info)
+
+        # The layer's routing is final here (later commits can no longer change
+        # paths or overlaps of this layer): store each route's allowed steiner
+        # T-junction region so consumers (initialize_steiner, animations, tests)
+        # do not need to recompute the overlap blocks.
+        node_to_gates = self.node_to_gates_by_layer[layer_idx]
+        for gate, route_info in self.routes_by_layer[layer_idx].items():
+            other_nodes = {
+                node
+                for node, gates in node_to_gates.items()
+                if gates - {gate}
+            }
+            route_info.junction_lo, route_info.junction_hi = (
+                self._fine_junction_bounds(route_info, other_nodes)
+            )
 
         return remainder_terminal_pairs
     
@@ -1580,7 +1655,8 @@ class TeleportationRouter(BasicRouter):
 
     
     def initialize_steiner(
-        self, vdp_dict, steiner_init_type: str, layers=None, k_lookahead=None
+        self, vdp_dict, steiner_init_type: str, layers=None, k_lookahead=None,
+        fine_routes=None,
     ):
         """
         Initialize a random steiner tree per path which are non-overlapping.
@@ -1590,7 +1666,15 @@ class TeleportationRouter(BasicRouter):
         If layers and k_lookahead are not None, only a limited number of trees is initialized; namely only for the qubits which are actually used in layers[:k_lookahead]. Other qubits are not moved.
         However, this turned out not to be really useful, because movements can be relevant even if this constraint does not hold.
         Therefore, layers and k_lookahead default to None.
+
+        If `fine_routes` (dict[Gate, RouteInfo] from find_fine_grained_vdp) is given,
+        the T-junction of each tree (the start of path_steiner) is restricted to the
+        committed ancilla's region of the route, cf. `_fine_junction_bounds`. The
+        allowed nodes per gate are recorded in `self.fine_allowed_junctions` so that
+        `perturbation` keeps respecting the restriction during annealing.
         """
+        # allowed T-junction nodes per gate; stays None in coarse mode
+        self.fine_allowed_junctions = {} if fine_routes is not None else None
 
         vdp_dict_reduced = vdp_dict.copy()
 
@@ -1634,10 +1718,24 @@ class TeleportationRouter(BasicRouter):
             # choose some node on the path randomly
             flag = False
             pathcopy = path.copy()
-            path = path[1:-1]  # remove last and first node from the list because those are logical data patches
-            random.shuffle(path)
+            # candidates for the T-junction (start of path_steiner): any interior
+            # node in coarse mode; in fine-grained mode only the region around the
+            # committed ancilla (outside every overlap block).
+            if fine_routes is not None and key in fine_routes:
+                ri = fine_routes[key]
+                lo = getattr(ri, "junction_lo", None)
+                hi = getattr(ri, "junction_hi", None)
+                if lo is None or hi is None:
+                    # routes from an older pickle: recompute on the fly
+                    lo, hi = self._fine_junction_bounds(ri, set(other_paths))
+                junction_candidates = pathcopy[lo : hi + 1]
+            else:
+                junction_candidates = pathcopy[1:-1]  # remove last and first node from the list because those are logical data patches
+            random.shuffle(junction_candidates)
+            if self.fine_allowed_junctions is not None:
+                self.fine_allowed_junctions[key] = set(junction_candidates)
             if steiner_init_type == "full_random":
-                for node_on_path in path:  # loop in case a random node has no other reachable nodes
+                for node_on_path in junction_candidates:  # loop in case a random node has no other reachable nodes
                     # determine all reachable nodes from that chosen node
                     reachable_nodes = list(
                         nx.single_source_shortest_path_length(
@@ -1658,8 +1756,8 @@ class TeleportationRouter(BasicRouter):
                 )
                 paths_lst_temp = (
                     []
-                )  # collect all paths from path1[1:-1] to new_terminal
-                for node_on_path in path:
+                )  # collect all paths from the junction candidates to new_terminal
+                for node_on_path in junction_candidates:
                     try:
                         path_temp = nx.dijkstra_path(
                             g_temp_temp, node_on_path, terminal_node
@@ -1670,7 +1768,7 @@ class TeleportationRouter(BasicRouter):
                 if paths_lst_temp:
                     path_steiner = min(paths_lst_temp, key=len)
             elif steiner_init_type == "on_path_random":
-                terminal_node = random.choice(path)  # choose a random terminal ON the path
+                terminal_node = random.choice(junction_candidates)  # choose a random terminal ON the path
                 path_steiner = [
                     terminal_node
                 ]  # terminal on the path does not need an extended path, but list should not be empty, otherwise error.
@@ -1999,14 +2097,28 @@ class TeleportationRouter(BasicRouter):
 
                 #!TODO should i skip this since we do it globally afterwards again?
                 # (A) loop to possibly find shorter path_terminal
-                paths_lst_temp = []  # collect all paths from path1[1:-1] to new_terminal
-                for node_on_path in path1[1:-1]:
+                # in fine-grained mode the T-junction may only sit in the committed
+                # ancilla's region, so restrict the candidate starting nodes.
+                allowed = None
+                if len(key_tree) == 3 and self.fine_allowed_junctions:
+                    allowed = self.fine_allowed_junctions.get(
+                        (key_tree[0], key_tree[1])
+                    )
+                starts = (
+                    path1[1:-1]
+                    if allowed is None
+                    else [n for n in path1[1:-1] if n in allowed]
+                )
+                paths_lst_temp = []  # collect all paths from the allowed starts to new_terminal
+                for node_on_path in starts:
                     try:
                         path_temp = nx.dijkstra_path(
                             g_temp, node_on_path, new_terminal
                         )
                         paths_lst_temp.append(path_temp)
-                    except nx.NetworkXNoPath:
+                    except (nx.NetworkXNoPath, nx.NodeNotFound):
+                        # NodeNotFound: a start node removed from g_temp (e.g. an
+                        # overlap-block node of path1 occupied by another route)
                         pass
                 if paths_lst_temp:
                     path_terminal = min(paths_lst_temp, key=len)
@@ -2091,13 +2203,24 @@ class TeleportationRouter(BasicRouter):
                     except nx.NetworkXNoPath:
                         pass
                 else:
-                    for node_on_path in path1[1:-1]:
+                    # same fine-grained T-junction restriction as in loop (A)
+                    allowed = None
+                    if len(key_tree) == 3 and self.fine_allowed_junctions:
+                        allowed = self.fine_allowed_junctions.get(
+                            (key_tree[0], key_tree[1])
+                        )
+                    starts = (
+                        path1[1:-1]
+                        if allowed is None
+                        else [n for n in path1[1:-1] if n in allowed]
+                    )
+                    for node_on_path in starts:
                         try:
                             path_temp = nx.dijkstra_path(
                                 g_tt, node_on_path, terminal
                             )
                             paths_lst_temp.append(path_temp)
-                        except nx.NetworkXNoPath:
+                        except (nx.NetworkXNoPath, nx.NodeNotFound):
                             pass
                 if paths_lst_temp:
                     path_terminal = min(paths_lst_temp, key=len)
@@ -2676,6 +2799,52 @@ class TeleportationRouter(BasicRouter):
 
         return schedule, danger_qubits, available_gaps, layout, layers
 
+    def _route_front_layer(
+        self,
+        layer,
+        logical_pos,
+        vdp_type: str,
+        overlap_type: str,
+        fine_layer_idx: int,
+    ):
+        """
+        Route the front layer with the selected VDP method.
+
+        Returns (vdp_dict, terminal_pairs_remainder, fine_routes):
+        - "coarse": exactly `find_max_vdp_set` as before (also updates
+          self.factory_times); fine_routes is None.
+        - "fine_grained": per-layer `find_fine_grained_vdp`; this layer's
+          RouteInfo dict is returned as fine_routes and additionally flattened
+          into a plain vdp_dict {gate: list(path)} for all downstream consumers
+          (initialize_steiner, idle moves, annealing, schedule). CNOT-only:
+          T gates and factories are not supported, self.factory_times is
+          passed through untouched.
+        """
+        if vdp_type == "coarse":
+            vdp_dict, remainder, self.factory_times = self.find_max_vdp_set(
+                layer, logical_pos, self.factory_times
+            )
+            return vdp_dict, remainder, None
+        if vdp_type != "fine_grained":
+            raise ValueError("`vdp_type` must be `coarse` or `fine_grained`")
+        if self.factory_pos:
+            raise NotImplementedError(
+                "vdp_type='fine_grained' does not handle factories yet; "
+                "use vdp_type='coarse' for layouts with factories."
+            )
+        for t_p in layer:
+            if isinstance(t_p[1], int):  # T gate: bare pos instead of (pos, pos)
+                raise NotImplementedError(
+                    "vdp_type='fine_grained' only supports CNOT gates, "
+                    f"but found the T gate {t_p}."
+                )
+        remainder = self.find_fine_grained_vdp(
+            fine_layer_idx, layer, logical_pos, self.factory_times, overlap_type
+        )
+        fine_routes = dict(self.routes_by_layer[fine_layer_idx])
+        vdp_dict = {gate: list(ri.path) for gate, ri in fine_routes.items()}
+        return vdp_dict, remainder, fine_routes
+
     def optimize_layers(
         self,
         terminal_pairs,
@@ -2695,8 +2864,10 @@ class TeleportationRouter(BasicRouter):
         include_steiner_teleport: bool = True,
         include_idle_teleport: bool= False,
         reduce_init_steiner: bool = False,
-        reduce_init_idle: bool = False, 
+        reduce_init_idle: bool = False,
         stimtest: bool = False,
+        vdp_type: str = "coarse",
+        overlap_type: str = "strict_k",
     ):
         """
         Optimize the positions in batches of size k_lookahead.
@@ -2713,10 +2884,29 @@ class TeleportationRouter(BasicRouter):
         `idle_move_type`: str
             asap: moving back is done as frequent as possible. this may destroy however structure of the predicted routing from the steiner search.
             later: means that moving back is only done when the steiner search is done. if a locking occurs, extra layers with moving back are necessary, but no moving back during the routing of the k_lookahead layers with jump_harvesting = True.
+        `vdp_type`: str
+            coarse: strictly vertex-disjoint routing via find_max_vdp_set (default, previous behavior).
+            fine_grained: two-phase routing via find_fine_grained_vdp; paths may share nodes across phases. CNOT-only (no T gates/factories). Each schedule entry additionally carries the layer's RouteInfo dict under "fine_routes".
+        `overlap_type`: str
+            only used for vdp_type="fine_grained": "strict2" or "strict_k" overlap resolution.
         """
 
         if idle_move_type not in {"asap", "later"}:
             raise ValueError("`move_idle_type` must be `asap` or `later`")
+        if vdp_type not in {"coarse", "fine_grained"}:
+            raise ValueError("`vdp_type` must be `coarse` or `fine_grained`")
+        if vdp_type == "fine_grained" and overlap_type not in {"strict2", "strict_k"}:
+            raise NotImplementedError(
+                f"Unknown overlap_type={overlap_type!r}; use 'strict2' or 'strict_k'."
+            )
+
+        fine_layer_idx = 0
+        self.fine_allowed_junctions = None
+        if vdp_type == "fine_grained":
+            # fresh per-run fine-grained state (find_fine_grained_vdp never clears)
+            self.routes_by_layer.clear()
+            self.overlap_graphs.clear()
+            self.node_to_gates_by_layer.clear()
 
         schedule = []
         
@@ -2755,12 +2945,18 @@ class TeleportationRouter(BasicRouter):
                 "layout": None,
                 "cost_history": None,
                 "idle_move_label": None,
+                "fine_routes": None,
             }
             schedule_temp_for_later = schedule_temp.copy()
             # find vdp solution for the front layer (we adapt layers dynamically, meaning we delete stuff which is already routed)
-            vdp_dict, terminal_pairs_remainder, self.factory_times = (
-                self.find_max_vdp_set(layers[0], None, self.factory_times)
+            vdp_dict, terminal_pairs_remainder, fine_routes = (
+                self._route_front_layer(
+                    layers[0], None, vdp_type, overlap_type, fine_layer_idx
+                )
             )
+            if vdp_type == "fine_grained":
+                fine_layer_idx += 1
+            schedule_temp["fine_routes"] = fine_routes
             logger.info(
                 "Iteration %d: |vdp_dict|=%d, pushing |terminal_pairs_remainder|=%d, remaining |layers|=%d",
                 it,
@@ -2858,7 +3054,8 @@ class TeleportationRouter(BasicRouter):
 
             if include_steiner_teleport:
                 steiner_dct = self.initialize_steiner(
-                    vdp_dict, steiner_init_type, layers=layers_steiner, k_lookahead=k_steiner
+                    vdp_dict, steiner_init_type, layers=layers_steiner, k_lookahead=k_steiner,
+                    fine_routes=fine_routes,
                 )
                 if include_idle_teleport:
                     idle_move_dct = self.initialize_idle_moves(
@@ -3146,11 +3343,18 @@ class TeleportationRouter(BasicRouter):
                     # initialize another schedule temp
                     schedule_temp = schedule_temp_for_later.copy()
                     # route
-                    vdp_dict, terminal_pairs_remainder, self.factory_times = (
-                        self.find_max_vdp_set(
-                            layers_k[0], self.logical_pos, self.factory_times
+                    vdp_dict, terminal_pairs_remainder, fine_routes = (
+                        self._route_front_layer(
+                            layers_k[0],
+                            self.logical_pos,
+                            vdp_type,
+                            overlap_type,
+                            fine_layer_idx,
                         )
                     )
+                    if vdp_type == "fine_grained":
+                        fine_layer_idx += 1
+                    schedule_temp["fine_routes"] = fine_routes
                     if len(layers_k) == 1 and len(terminal_pairs_remainder) == 0:
                         # no further steps needed
                         schedule_temp["vdp_dict"] = vdp_dict
@@ -3177,8 +3381,10 @@ class TeleportationRouter(BasicRouter):
                             if vdp_key not in vdp_dict.keys():
                                 matching = False
                         if (
-                            idle_move_type == "asap"
-                        ):  # if asap idle move type then there's no problem if matching wrong
+                            idle_move_type == "asap" or vdp_type == "fine_grained"
+                        ):  # asap: no problem if matching wrong. fine_grained: the SA
+                            # metric routes coarsely, so it packs layers differently
+                            # than the fine-grained routing and a mismatch is expected.
                             del best_schedule[0]
 
                         elif idle_move_type == "later":
@@ -3302,7 +3508,19 @@ class TeleportationRouter(BasicRouter):
                 warnings.warn("Stim test failed: Pushing gates causes trouble):")
 
         # test whether something overlapping
-        if tst.check_duplicate_nodes_per_layer(schedule):
+        if vdp_type == "fine_grained":
+            # the coarse duplicate check would flag the intended two-phase overlaps,
+            # so check like-phase disjointness instead. (steiner branches are mutually
+            # disjoint and avoid all paths by construction; they are not covered here.)
+            if tst.test_duplicate_nodes_fg(self.routes_by_layer):
+                logger.info(
+                    "No like-phase duplicates in any fine-grained layer - all good(:"
+                )
+            else:
+                warnings.warn(
+                    "Fine-grained routing has like-phase duplicate nodes in some layer!"
+                )
+        elif tst.check_duplicate_nodes_per_layer(schedule):
             logger.info(
                 "No duplicates found in any layer of the schedule - hence all good(:"
             )
