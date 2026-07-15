@@ -1388,19 +1388,6 @@ class TeleportationRouter(BasicRouter):
 
         """
         
-    
-        #if include_steiner_teleport:
-        #    steiner_dct = copy.deepcopy(init_steiner_dct)
-        #else:
-        #    steiner_dct = {}
-
-        #if include_idle_teleport:
-            #idle_move_dct = copy.deepcopy(init_idle_dct)
-        #else:
-            #idle_move_dct = {}
-
-        #teleport_dct = {**steiner_dct, **idle_move_dct}
-        #!TODO INCLUDE IDLE MOVING GAPS AS PART OF THE ANNEALING TO AVOID SEQUENTIALIZATION
         
         if T_start < T_end:
             raise ValueError("T_start must be larger than T_end")

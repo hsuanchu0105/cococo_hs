@@ -1727,7 +1727,10 @@ class TeleportationRouter(BasicRouter):
                 hi = getattr(ri, "junction_hi", None)
                 if lo is None or hi is None:
                     # routes from an older pickle: recompute on the fly
-                    lo, hi = self._fine_junction_bounds(ri, set(other_paths))
+                    #lo, hi = self._fine_junction_bounds(ri, set(other_paths))
+                    raise NotImplementedError(
+                        "junction lower/upper bound is empty"
+                    )
                 junction_candidates = pathcopy[lo : hi + 1]
             else:
                 junction_candidates = pathcopy[1:-1]  # remove last and first node from the list because those are logical data patches
@@ -1749,19 +1752,12 @@ class TeleportationRouter(BasicRouter):
                     continue  # skip this path if no reachable node found
                 # select a random reachable node
                 terminal_node = random.choice(reachable_nodes)
-                #! TODO are these three lines redundant?
                 # determine the path between the node which is ensured on the path and the terminal
-                path_steiner = nx.dijkstra_path(
-                    g_temp_temp, node_on_path, terminal_node
-                )
-                paths_lst_temp = (
-                    []
-                )  # collect all paths from the junction candidates to new_terminal
+                path_steiner = nx.dijkstra_path(g_temp_temp, node_on_path, terminal_node)
+                paths_lst_temp = []  # collect all paths from the junction candidates to new_terminal
                 for node_on_path in junction_candidates:
                     try:
-                        path_temp = nx.dijkstra_path(
-                            g_temp_temp, node_on_path, terminal_node
-                        )
+                        path_temp = nx.dijkstra_path(g_temp_temp, node_on_path, terminal_node)
                         paths_lst_temp.append(path_temp)
                     except (nx.NetworkXNoPath, nx.NodeNotFound):
                         pass
