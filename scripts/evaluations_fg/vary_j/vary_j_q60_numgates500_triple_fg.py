@@ -34,9 +34,10 @@ layout = {i: j for i, j in enumerate(data_qubit_locs)}
 q = len(data_qubit_locs)
 print("q = ", len(data_qubit_locs))
 
-n_circ = 10  # go through 5 circuits
+n_circ = 1   # go through 5 circuits
 
-j_lst = [2, 3, 4, 5, 10, 15, 20, 25, 30]
+j_lst = [5, 15]
+#j_lst = [2, 3, 4, 5, 10, 15, 20, 25, 30]
 j_lst_str = [str(el) for el in j_lst]
 j_str = "_".join(map(str, j_lst))
 
@@ -47,7 +48,11 @@ use_dag = True
 reps = 20
 
 date_str = datetime.now().strftime("%Y-%m-%d")
-path = f"varyj_layouttype{layout_type}_q{q}_m{m}_n{n}_j{j_str}_numgates{num_gates}_dvaries_ncirc{n_circ}_{date_str}_usedag{use_dag}.pkl"
+# outputs land next to this script, independent of the job's working directory
+out_dir = Path(__file__).parent
+filename = f"varyj_layouttype{layout_type}_q{q}_m{m}_n{n}_j{j_str}_numgates{num_gates}_dvaries_ncirc{n_circ}_{date_str}_usedag{use_dag}.pkl"
+path = out_dir / filename
+pdf_name = filename.replace(".pkl", ".pdf")
 
 # ------------params fg-----------------
 valid_path = "cc"
@@ -70,7 +75,7 @@ for j in j_lst:
     d = np.ceil(
         num_gates / j
     )  # round up because last layer will not be full of j gates but be a layer nevertheless.
-    path_circuits = f"true_seq_circs_j{j}_q{q}_numgates{num_gates}d{d}_x{reps}.json"
+    path_circuits = out_dir / f"true_seq_circs_j{j}_q{q}_numgates{num_gates}d{d}_x{reps}.json"
     try:
         with open(path_circuits, "r") as f:
             pairs_lst = json.load(f)
@@ -223,7 +228,7 @@ plt.legend()
 plt.tight_layout()
 
 plt.savefig(
-    "plot_total_" + path.replace(".pkl", ".pdf"),
+    out_dir / ("plot_total_" + pdf_name),
     bbox_inches="tight",
     pad_inches=0.02,
     transparent=True,
@@ -248,7 +253,7 @@ plt.xticks(j_lst, j_lst_str)
 plt.tight_layout()
 
 plt.savefig(
-    "plot_absdelta_" + path.replace(".pkl", ".pdf"),
+    out_dir / ("plot_absdelta_" + pdf_name),
     bbox_inches="tight",
     pad_inches=0.02,
     transparent=True,

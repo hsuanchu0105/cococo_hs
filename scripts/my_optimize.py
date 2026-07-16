@@ -16,9 +16,9 @@ from datetime import datetime
 
 seed = 45
 
-layout_type = "single"
+layout_type = "hex"
 m = 4
-n = 8
+n = 4
 factories = []
 remove_edges = False
 g, data_qubit_locs, factory_ring = layouts.gen_layout_scalable(layout_type, m, n, factories, remove_edges)

@@ -1,8 +1,6 @@
 import sys
 from pathlib import Path
 
-# must come before the cococo imports below, or they cannot be resolved
-# scripts/evaluations_fg/fix_q_vary_depth/ -> repo root is 3 levels up
 project_root = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(project_root / "src"))
 
@@ -17,6 +15,7 @@ import matplotlib.pyplot as plt
 import itertools
 import pickle
 
+
 from datetime import datetime
 import time
 
@@ -25,18 +24,16 @@ import json
 # -----params-------
 
 j = 8
-q = 120
+q = 96
 d = 320
 num_gates = 2560
-# The JSON holds reps = 20 independent random circuits of 2560 gates each
 reps = 20
 
 
 # ------load circuits------
-circ_dir = Path(__file__).parent  # json sits next to this script
-circ_path = circ_dir / f"true_seq_circs_j{j}_q{q}_numgates{num_gates}d{d}_x{reps}.json"
+path = f"true_seq_circs_j{j}_q{q}_numgates{num_gates}d{d}_x{reps}.json"
 try:
-    with open(circ_path, "r") as f:
+    with open(path, "r") as f:
         pairs_lst = json.load(f)
 except FileNotFoundError:
     print("new circs sampled")
@@ -46,14 +43,14 @@ except FileNotFoundError:
             j, q, num_gates, seed=j * 1000 + r
         )
         pairs_lst.append(pairs)
-    with open(circ_path, "w") as f:
+    with open(path, "w") as f:
         json.dump(pairs_lst, f)
 # turn into tuples again
 pairs_lst = [[(el[0], el[1]) for el in pairs] for pairs in pairs_lst]
 
 # ------geometry params---------
 factories = []
-m, n = 4, 5
+m, n = 4, 4
 layout_type = "hex"
 g, data_qubit_locs, _ = layouts.gen_layout_scalable(
     layout_type, m, n, factories, remove_edges=False
@@ -62,7 +59,7 @@ layout = {i: j for i, j in enumerate(data_qubit_locs)}
 
 assert q == len(data_qubit_locs), "given q does not coincide with your chosen layout"
 
-# how many of the 20 circuits in the JSON you actually use
+sigma = 1
 n_circ = 10
 
 gates_list = [320, 640, 1280, 2560]
@@ -73,22 +70,39 @@ gates_str = "_".join(map(str, gates_list))
 
 use_dag = True
 
-# -----params fine-grained-------
-
-valid_path = "cc"
-
-t = 4  # mock value for cnot circuit
-metric = "exact"
-overlap_type = "strict_k"
-
-testing = True
-
 date_str = datetime.now().strftime("%Y-%m-%d")
 # outputs land next to this script, independent of the working directory
 out_dir = Path(__file__).parent
-filename = f"circuit_depths_fg_m{m}_n{n}_layout{layout_type}_ncirc{n_circ}_num_gates{gates_str}_overlap{overlap_type}_{date_str}_usedag{use_dag}_p.pkl"
+filename = f"circuit_depths_m{m}_n{n}_layout{layout_type}_sigma{sigma}_ncirc{n_circ}_num_gates{gates_str}_{date_str}_usedag{use_dag}_p.pkl"
 path = out_dir / filename
 pdf_name = filename.replace(".pkl", ".pdf")
+
+
+
+
+
+# -----params opt-------
+
+valid_path = "cc"
+
+max_iters = 100
+T_start = 100.0
+T_end = 0.1
+alpha = 0.95
+t = 4  # mock value for cnot circuit
+radius = 10
+k_lookahead = 5
+metric = "exact"
+
+steiner_init_type = "full_random"
+jump_harvesting = True
+stimtest = True
+
+reduce_steiner = True
+idle_move_type = "later"
+reduce_init_steiner = False
+
+testing = True
 
 terminal_pairs_list = []
 for pairs in pairs_lst[:n_circ]:
@@ -96,28 +110,31 @@ for pairs in pairs_lst[:n_circ]:
     terminal_pairs = layouts.translate_layout_circuit(pairs, layout)
     terminal_pairs_list.append(terminal_pairs)
 
-#print("terminal pairs lst")
-#for el in terminal_pairs_list:
-#    print(el)
+print("terminal pairs lst")
+for el in terminal_pairs_list:
+    print(el)
 
 
 # -----------run--------------
 results_list_st = (
     []
 )  # list of sublists, in each sublist results of each of the num_circs
-results_list_fg = []
+results_list_opt = []
+histories = []
 layers_tot = []
 # run layer for layer
 start = time.time()
 for num_gates in gates_list:
     print("num_gates: ", num_gates)
     results_temp_st = []
-    results_temp_fg = []
+    results_temp_opt = []
+    histories_temp_opt = []
     layers_temp = []
-    for circ in terminal_pairs_list:
+    for c_idx, circ in enumerate(terminal_pairs_list):
         temp_circuit = circ[:num_gates]  # cut off the gates
 
         # standard
+        j = 0
         quilt = utils.BasicRouter(
             g,
             data_qubit_locs,
@@ -135,51 +152,77 @@ for num_gates in gates_list:
 
         # log
         dag = dag_helper.terminal_pairs_into_dag(temp_circuit, layout)
-        log_layers = []
+        layers = []
         for layer in range(len(list(dag.layers()))):
-            log_layers.append(dag_helper.extract_layer_from_dag(dag, layout, layer))
-        layers_temp.append(log_layers.copy())
+            layers.append(dag_helper.extract_layer_from_dag(dag, layout, layer))
+        layers_temp.append(layers.copy())
 
-        # fine grained
-        quilt = utils.BasicRouter(
-            g,
-            data_qubit_locs,
-            factories,
-            valid_path,
-            t,
-            metric,
-            use_dag=use_dag,
-        )
-        # writes its schedule into quilt.routes_by_layer, returns nothing
-        quilt.find_total_fine_grained_vdp_dyn(
-            quilt.split_layer_terminal_pairs(temp_circuit),
-            None,
-            None,
-            layout=layout,
-            overlap_type=overlap_type,
-            testing=testing,
-        )
-        fine_routes = {
-            idx: dict(routes) for idx, routes in quilt.routes_by_layer.items()
-        }
-        print("fine grained depth: ", len(fine_routes))
-        results_temp_fg.append(fine_routes)
+        # opt
+        schedule_list_opt_temp = []
+        history_temp = []
+        for j in range(sigma):
+            print(f"-----sigma run ={j}-----")
+            quilt = utils.TeleportationRouter(
+                g,
+                data_qubit_locs,
+                factories,
+                valid_path,
+                t,
+                metric,
+                use_dag=use_dag,
+                seed=j,
+            )
+
+            # dedicated schedule dump, distinct from the results pickle above,
+            # unique per (num_gates, circuit, sigma-run), sigma in the name
+            sched_dir = out_dir / "schedules"
+            sched_dir.mkdir(exist_ok=True)
+            sched_filename = str(
+                sched_dir
+                / f"schedule_m{m}_n{n}_layout{layout_type}_sigma{sigma}"
+                f"_numgates{num_gates}_circ{c_idx}_run{j}_{date_str}.pkl"
+            )
+            schedule, history = quilt.optimize_layers(
+                temp_circuit,
+                layout,
+                max_iters,
+                T_start,
+                T_end,
+                alpha,
+                radius = radius,
+                k_lookahead = k_lookahead,
+                max_idle_teleport = 5,
+                steiner_init_type = steiner_init_type,
+                jump_harvesting = jump_harvesting,
+                reduce_teleport = True,
+                idle_move_type = idle_move_type,
+                filename = sched_filename,
+                include_steiner_teleport = False,
+                include_idle_teleport = True,
+                reduce_init_steiner = False,
+                reduce_init_idle = True, 
+                stimtest = True, 
+            )
+            schedule_list_opt_temp.append(schedule)
+            history_temp.append(history)
+        results_temp_opt.append(schedule_list_opt_temp)
+        histories_temp_opt.append(history_temp)
 
     results_list_st.append(results_temp_st)
-    results_list_fg.append(results_temp_fg)
+    results_list_opt.append(results_temp_opt)
+    histories.append(histories_temp_opt)
     layers_tot.append(layers_temp)
 
-    save = [results_list_st, results_list_fg, layers_tot]
+    save = [results_list_st, results_list_opt, histories, layers_tot]
     with open(path, "wb") as f:
         pickle.dump(save, f)
 end = time.time()
-print("total runtime: ", end - start)
 
 
 # reload
 with open(path, "rb") as f:
     saved = pickle.load(f)
-[results_list_st, results_list_fg, layers_tot] = saved
+[results_list_st, results_list_opt, histories, layers_tot] = saved
 
 
 # ---------extract data-----------
@@ -201,12 +244,23 @@ print("depths_mean_log", depths_mean_log)
 labels = [f"({g},\n {d})" for g, d in zip(gates_list, depths_list)]
 
 
-# mean and std of the fine-grained approach
-# the routine is deterministic, so there is one schedule per circuit (no sigma runs)
-depths_fg = [[len(routes) for routes in sublist] for sublist in results_list_fg]
-depths_mean_fg = [np.mean(lst) for lst in depths_fg]
-depths_std_fg = [np.std(lst) for lst in depths_fg]
-print("depths_mean_fg", depths_mean_fg)
+# mean and std of standard approach, choose best results among sigma runs
+depths_opt = []
+depths_mean_opt = []
+depths_std_opt = []
+for i, results in enumerate(results_list_opt):
+    print(f"-----log. depth {i}------")
+    depths_n = []  # the n results from which we take the mean
+    for j, run in enumerate(results):
+        print(f"------run number {j}-------")
+        lengths = [len(schedule) for schedule in run]
+        print("depths of sigma opt runs:", lengths)
+        min_depth = min(lengths)
+        depths_n.append(min_depth)
+    depths_opt.append(depths_n)
+    print("best depths per run circuit: ", depths_n)
+    depths_mean_opt.append(np.mean(depths_n))
+    depths_std_opt.append(np.std(depths_n))
 
 # figsize
 size = (4, 3)
@@ -217,12 +271,12 @@ size = (4, 3)
 plt.figure(figsize=size)
 plt.errorbar(
     gates_list,
-    depths_mean_fg,
-    yerr=depths_std_fg,
+    depths_mean_opt,
+    yerr=depths_std_opt,
     fmt="*-",
     color="lightseagreen",
     capsize=3,
-    label="Depth Fine-grained",
+    label="Depth Opt.",
 )
 plt.errorbar(
     gates_list,
@@ -256,23 +310,26 @@ plt.savefig(out_dir / ("plot_total_" + pdf_name))
 plt.clf()
 
 
-# plot improvement d fg - c / d st -c
+# plot improvement d opt - c / d st -c
 improvements_mean = []
 improvements_std = []
-for lst_fg, lst_st, c_list in zip(depths_fg, depths_st, depths_log):
+for lst_opt, lst_st, c_list in zip(depths_opt, depths_st, depths_log, strict=False):
     temp = []
-    for el_fg, el_st, c in zip(lst_fg, lst_st, c_list):
-        if el_st == c:
-            # standard routing already achieves the logical depth, ratio undefined
-            continue
-        temp.append((el_fg - c) / (el_st - c))
+    for el_opt, el_st, c in zip(lst_opt, lst_st, c_list, strict=False):
+        denominator = el_st - c
+        if denominator != 0:
+            temp.append((el_opt - c) / denominator)
+        else:
+            temp.append(np.nan)
     print("improvements temp", temp)
-    improvements_mean.append(np.mean(temp) if temp else np.nan)
-    improvements_std.append(np.std(temp) if temp else np.nan)
+    # nan-aware: undefined ratios (el_st == c) are NaN and must be ignored,
+    # otherwise a single one would turn the whole bin's mean/std into NaN
+    improvements_mean.append(np.nanmean(temp))
+    improvements_std.append(np.nanstd(temp))
 
 plt.figure(figsize=size)
 plt.errorbar(gates_list, improvements_mean, yerr=improvements_std, fmt=".-", capsize=3)
-plt.ylabel(r"$\frac{d_{fg}-c}{d_{st}-c}$")
+plt.ylabel(r"$\frac{d_{opt}-c}{d_{st}-c}$")
 plt.xlabel("Num. Gates / Log. Depth")
 plt.xscale("log")
 plt.grid(True, which="both", ls="--", alpha=0.7)
@@ -284,16 +341,16 @@ plt.savefig(out_dir / ("plot_improvements_total_" + pdf_name))
 plt.clf()
 
 # plot absolute differences
-diff_fg_mean = []
-diff_fg_std = []
-for lst_fg, lst_st in zip(depths_fg, depths_st):
-    differences = [el_st - el_fg for el_st, el_fg in zip(lst_st, lst_fg)]
+diff_opt_mean = []
+diff_opt_std = []
+for lst_opt, lst_st in zip(depths_opt, depths_st):
+    differences = [el_st - el_opt for el_st, el_opt in zip(lst_st, lst_opt)]
     print("abs differences", differences)
-    diff_fg_mean.append(np.mean(differences))
-    diff_fg_std.append(np.std(differences))
+    diff_opt_mean.append(np.mean(differences))
+    diff_opt_std.append(np.std(differences))
 plt.figure(figsize=size)
-plt.errorbar(gates_list, diff_fg_mean, yerr=diff_fg_std, fmt=".-", capsize=3)
-plt.ylabel(r"$\Delta = d_{st} - d_{fg}$")
+plt.errorbar(gates_list, diff_opt_mean, yerr=diff_opt_std, fmt=".-", capsize=3)
+plt.ylabel(r"$\Delta = d_{st} - d_{opt}$")
 plt.xlabel("Num. Gates / Log. Depth")
 plt.xscale("log")
 # plt.xticks(gates_list, gates_list)
