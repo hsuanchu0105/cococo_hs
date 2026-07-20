@@ -1110,6 +1110,7 @@ class BasicRouter:
             logical_pos: None | list[pos],
             factory_times: dict[pos, int],
             overlap_type:str,
+            max_overlap: int = 5,
         ) -> list[Gate]:
             
         paths_current_layer = [] 
@@ -1147,7 +1148,7 @@ class BasicRouter:
                 if overlap_type == "strict2":
                     within_cap = n == 2
                 elif overlap_type == "strict_k":
-                    within_cap = n <= 5
+                    within_cap = n <= max_overlap
                 else:
                     raise NotImplementedError(
                         f"Unknown overlap_type={overlap_type!r}"
@@ -1222,8 +1223,9 @@ class BasicRouter:
     layers,
     logical_pos,
     factory_times,
+    overlap_type: str,
     layout = None,
-    overlap_type: str = "strict2",
+    max_overlap: int = 5, 
     testing: bool = False
     ):
         if self.use_dag and layout is None:
@@ -1272,6 +1274,7 @@ class BasicRouter:
                 logical_pos,
                 factory_times,
                 overlap_type,
+                max_overlap,
             )
 
             if self.use_dag:

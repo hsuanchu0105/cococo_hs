@@ -29,6 +29,7 @@ remove_edges = False
 g, data_qubit_locs, factory_ring = layouts.gen_layout_scalable(layout_type, m, n, factories, remove_edges)
 layout = {i: j for i,j in enumerate(data_qubit_locs)}
 t=2
+max_overlap = 2
 
 #plotting.plot_lattice_paths(g, {}, {}, layout, factories, size = (18,8))
 
@@ -56,47 +57,13 @@ vdp_layers, _ = router.find_total_vdp_layers_dyn(layers, data_qubit_locs, router
 print("Len of schedule without teleportation: ", len(vdp_layers))
 
 i = 0
-"""
-while i < len(layers):
-    terminal_pairs_remainder = router.find_fine_grained_vdp(
-        i,
-        layers[i],
-        None,
-        None,
-        "strict2",
-    )
 
-    if router.use_dag:
-        next_layer_update, dag = dag_helper.push_remainder_into_layers_dag(
-            dag,
-            terminal_pairs_remainder,
-            layout,
-            layers[i],
-        )
-
-        # You need to decide how next_layer_update corresponds to layers.
-        # If it represents the remaining future layers, assign it carefully.
-        layers = layers[: i+1] + next_layer_update
-
-    else:
-        if terminal_pairs_remainder:
-            future_layers_update = router.push_remainder_into_layers(
-                layers[i+1 :],
-                terminal_pairs_remainder,
-                delete_layer_zero=False,
-            )
-
-            layers = layers[: i+1] + future_layers_update
-
-    i += 1
-
-"""
 # When benchmarking (BENCH=1) skip the stim correctness check and the animation
 # so the timing reflects the routing itself.
 bench = os.environ.get("BENCH") == "1"
 
 t_start = time.perf_counter()
-router.find_total_fine_grained_vdp_dyn(layers, None, None, layout = layout, overlap_type = "strict_k", testing = True)
+router.find_total_fine_grained_vdp_dyn(layers, None, None, layout = layout, max_overlap = max_overlap, overlap_type = "strict_k", testing = True)
 elapsed = time.perf_counter() - t_start
 #print(router.overlap_graphs.values())
 #print(router.routes_by_layer)
