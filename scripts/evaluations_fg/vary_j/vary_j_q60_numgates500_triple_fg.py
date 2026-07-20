@@ -60,6 +60,7 @@ valid_path = "cc"
 t = 4  # mock value for cnot circuit
 metric = "exact"
 overlap_type = "strict_k"
+max_overlap = 5  # largest overlap component strict_k still attempts
 
 testing = True
 
@@ -144,6 +145,7 @@ for j in j_lst:
             None,
             layout=layout,
             overlap_type=overlap_type,
+            max_overlap=max_overlap,
             testing=testing,
         )
         fine_routes = {

@@ -80,13 +80,14 @@ valid_path = "cc"
 t = 4  # mock value for cnot circuit
 metric = "exact"
 overlap_type = "strict_k"
+max_overlap = 5  # largest overlap component strict_k still attempts
 
 testing = True
 
 date_str = datetime.now().strftime("%Y-%m-%d")
 # outputs land next to this script, independent of the working directory
 out_dir = Path(__file__).parent
-filename = f"circuit_depths_fg_m{m}_n{n}_layout{layout_type}_ncirc{n_circ}_num_gates{gates_str}_overlap{overlap_type}_{date_str}_usedag{use_dag}_p.pkl"
+filename = f"circuit_depths_fg_m{m}_n{n}_layout{layout_type}_ncirc{n_circ}_num_gates{gates_str}_overlap{overlap_type}{max_overlap}_{date_str}_usedag{use_dag}_p.pkl"
 path = out_dir / filename
 pdf_name = filename.replace(".pkl", ".pdf")
 
@@ -157,6 +158,7 @@ for num_gates in gates_list:
             None,
             layout=layout,
             overlap_type=overlap_type,
+            max_overlap=max_overlap,
             testing=testing,
         )
         fine_routes = {

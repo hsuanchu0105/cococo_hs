@@ -1144,7 +1144,8 @@ class BasicRouter:
                     paths_current_layer.append(path)
                     continue
 
-                # Component-size cap per method (strict2 = 2 paths, strict_k = up to 5).
+                # Component-size cap per method (strict2 = 2 paths,
+                # strict_k = up to max_overlap paths).
                 if overlap_type == "strict2":
                     within_cap = n == 2
                 elif overlap_type == "strict_k":
@@ -1225,13 +1226,23 @@ class BasicRouter:
     factory_times,
     overlap_type: str,
     layout = None,
-    max_overlap: int = 5, 
+    max_overlap: int = 5,
     testing: bool = False
     ):
+        """
+        `max_overlap`: int
+            only used for overlap_type="strict_k": the largest overlap component
+            (number of mutually overlapping paths) that is still attempted.
+            Ignored for "strict2", which is fixed at 2 by definition.
+        """
         if self.use_dag and layout is None:
             raise ValueError(
                 "If self.use_dag=True, layout must be provided."
             )
+        if overlap_type == "strict_k" and max_overlap < 2:
+            # 1 would reject every overlapping route (the n == 1 case is already
+            # short-circuited), silently degrading fine_grained to plain VDP.
+            raise ValueError(f"`max_overlap` must be >= 2, got {max_overlap}.")
 
         # Optional but recommended: clear previous fine-grained routing state
         self.routes_by_layer.clear()
@@ -2805,6 +2816,7 @@ class TeleportationRouter(BasicRouter):
         vdp_type: str,
         overlap_type: str,
         fine_layer_idx: int,
+        max_overlap: int,
     ):
         """
         Route the front layer with the selected VDP method.
@@ -2838,7 +2850,12 @@ class TeleportationRouter(BasicRouter):
                     f"but found the T gate {t_p}."
                 )
         remainder = self.find_fine_grained_vdp(
-            fine_layer_idx, layer, logical_pos, self.factory_times, overlap_type
+            fine_layer_idx,
+            layer,
+            logical_pos,
+            self.factory_times,
+            overlap_type,
+            max_overlap,
         )
         fine_routes = dict(self.routes_by_layer[fine_layer_idx])
         vdp_dict = {gate: list(ri.path) for gate, ri in fine_routes.items()}
@@ -2867,6 +2884,7 @@ class TeleportationRouter(BasicRouter):
         stimtest: bool = False,
         vdp_type: str = "coarse",
         overlap_type: str = "strict_k",
+        max_overlap: int = 5,
     ):
         """
         Optimize the positions in batches of size k_lookahead.
@@ -2888,6 +2906,10 @@ class TeleportationRouter(BasicRouter):
             fine_grained: two-phase routing via find_fine_grained_vdp; paths may share nodes across phases. CNOT-only (no T gates/factories). Each schedule entry additionally carries the layer's RouteInfo dict under "fine_routes".
         `overlap_type`: str
             only used for vdp_type="fine_grained": "strict2" or "strict_k" overlap resolution.
+        `max_overlap`: int
+            only used for overlap_type="strict_k": the largest overlap component (number of
+            mutually overlapping paths) that is still attempted. Ignored for "strict2",
+            which is fixed at 2 by definition.
         """
 
         if idle_move_type not in {"asap", "later"}:
@@ -2898,6 +2920,10 @@ class TeleportationRouter(BasicRouter):
             raise NotImplementedError(
                 f"Unknown overlap_type={overlap_type!r}; use 'strict2' or 'strict_k'."
             )
+        if vdp_type == "fine_grained" and max_overlap < 2:
+            # 1 would reject every overlapping route (the n == 1 case is already
+            # short-circuited), silently degrading fine_grained to plain VDP.
+            raise ValueError(f"`max_overlap` must be >= 2, got {max_overlap}.")
 
         fine_layer_idx = 0
         self.fine_allowed_junctions = None
@@ -2950,7 +2976,7 @@ class TeleportationRouter(BasicRouter):
             # find vdp solution for the front layer (we adapt layers dynamically, meaning we delete stuff which is already routed)
             vdp_dict, terminal_pairs_remainder, fine_routes = (
                 self._route_front_layer(
-                    layers[0], None, vdp_type, overlap_type, fine_layer_idx
+                    layers[0], None, vdp_type, overlap_type, fine_layer_idx, max_overlap
                 )
             )
             if vdp_type == "fine_grained":
@@ -3349,6 +3375,7 @@ class TeleportationRouter(BasicRouter):
                             vdp_type,
                             overlap_type,
                             fine_layer_idx,
+                            max_overlap,
                         )
                     )
                     if vdp_type == "fine_grained":
