@@ -550,6 +550,7 @@ class BasicRouter:
 
         #print("Overlap graph before adding this path", G)
 
+        # get direct overlaps of the route_info, direct_overlaps = {gate: overlap_nodes}
         direct_overlaps = self.get_overlaps(
             layer_idx,
             route_info,
@@ -571,7 +572,10 @@ class BasicRouter:
             if G.has_node(other_gate):
                 affected_gates.update(nx.node_connected_component(G, other_gate))
             else:
-                affected_gates.add(other_gate)
+                raise NotImplementedError(
+                f"Gate {other_gate} not exists in the graph!"
+                )
+                #affected_gates.add(other_gate)
 
         # Copy only affected part.
         H = G.subgraph(affected_gates).copy()
@@ -939,8 +943,8 @@ class BasicRouter:
             if not overlap_nodes:
                 return False, None, f"Edge {g}-{h} carries no overlap_nodes."
 
-            ig = sorted(idx_of[g][n] for n in overlap_nodes)
-            ih = sorted(idx_of[h][n] for n in overlap_nodes)
+            ig = sorted(idx_of[g][n] for n in overlap_nodes) # index of overlap_nodes in gate g path 
+            ih = sorted(idx_of[h][n] for n in overlap_nodes) # index of overlap_nodes in gate h path 
             if not self._is_consecutive(ig) or not self._is_consecutive(ih):
                 return (
                     False,
@@ -1023,7 +1027,7 @@ class BasicRouter:
         # 5. Materialise concrete ancilla indices and first_part for gate in local overlap graph
         updated: dict[Gate, RouteInfo] = {}
         for g in gates:
-            opt = chosen[g]
+            opt = chosen[g] # choice option
             ancilla_idx = random.randint(opt["lo"], opt["hi"])
             updated[g] = replace(
                 route_infos[g],
@@ -1182,6 +1186,7 @@ class BasicRouter:
 
                 g_temp.remove_nodes_from(nodes_occupied)
                 try:
+                    # find an alternative path 
                     alt_path = self.valid_path_method()(g_temp, gate[0], gate[1])
                     alt_info = self.make_route_info(
                         gate,
@@ -1225,8 +1230,8 @@ class BasicRouter:
     logical_pos,
     factory_times,
     overlap_type: str,
+    max_overlap: int,
     layout = None,
-    max_overlap: int = 5,
     testing: bool = False
     ):
         """
@@ -2277,19 +2282,35 @@ class TeleportationRouter(BasicRouter):
             result.append( self.replace_pos(layer, old_pos, new_pos) )
         return result
 
-    def calculate_cost(self, metric, layers, logical_pos, factory_times, layout):
+    def calculate_cost(self, metric, vdp_type, overlap_type, max_overlap, layers, logical_pos, factory_times, layout):
         cost = 0
         if metric == "crossing":
                 cost = self.count_crossings(
                     layers, logical_pos
                 )  # overwrite this in the upcoming loop
         elif metric == "exact":
-            schedule, _ = self.find_total_vdp_layers_dyn(
-                layers,
-                logical_pos,
-                factory_times,
-                layout,
-            )  # initially the self.logical pos can be used. later you need a logical_pos outside of self
+            if vdp_type == "coarse":
+                schedule, _ = self.find_total_vdp_layers_dyn(
+                    layers,
+                    logical_pos,
+                    factory_times,
+                    layout,
+                )  # initially the self.logical pos can be used. later you need a logical_pos outside of self
+            elif vdp_type == "fine-grained":
+                schedule, _ = self.find_total_fine_grained_vdp_dyn(
+                    layers,
+                    logical_pos,
+                    factory_times,
+                    overlap_type,
+                    max_overlap,
+                    layout,
+                    testing = True,
+                )
+            else:
+                raise NotImplementedError(
+                "Other vdp types are not implemented yet."
+                )
+
             if schedule is not None:
                 cost = len(schedule)
             else:
@@ -2312,6 +2333,9 @@ class TeleportationRouter(BasicRouter):
         T_end: float,
         alpha: int,
         k_lookahead: int,
+        vdp_type: str, 
+        overlap_type: str | None, 
+        max_overlap: int | None,
         radius: int,
         vdp_dict,
         layout,
@@ -2369,7 +2393,7 @@ class TeleportationRouter(BasicRouter):
 
         self.logical_pos_temp = self.logical_pos.copy()
         factory_times_copy = self.factory_times.copy()
-        cost, schedule = self.calculate_cost(self.metric, next_layers[:k_lookahead], self.logical_pos_temp, factory_times_copy, layout)
+        cost, schedule = self.calculate_cost(self.metric, vdp_type, overlap_type, max_overlap, next_layers[:k_lookahead], self.logical_pos_temp, factory_times_copy, layout)
         
         best_teleport = teleport_dct
         best_cost = cost
@@ -2876,15 +2900,15 @@ class TeleportationRouter(BasicRouter):
         jump_harvesting: str,
         reduce_teleport: bool,
         idle_move_type: str,
+        vdp_type: str,
+        overlap_type: str | None,
+        max_overlap: int | None,
         filename: str,
         include_steiner_teleport: bool = True,
         include_idle_teleport: bool= False,
         reduce_init_steiner: bool = False,
         reduce_init_idle: bool = False,
         stimtest: bool = False,
-        vdp_type: str = "coarse",
-        overlap_type: str = "strict_k",
-        max_overlap: int = 5,
     ):
         """
         Optimize the positions in batches of size k_lookahead.
@@ -3119,6 +3143,9 @@ class TeleportationRouter(BasicRouter):
                     T_end,
                     alpha,
                     k_lookahead,
+                    vdp_type,
+                    overlap_type, 
+                    max_overlap,
                     radius=radius,
                     vdp_dict=schedule_temp["vdp_dict"],
                     layout=layout,

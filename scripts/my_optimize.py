@@ -16,9 +16,9 @@ from datetime import datetime
 
 seed = 45
 
-layout_type = "hex"
-m = 4
-n = 4
+layout_type = "pair"
+m = 9
+n = 12
 factories = []
 remove_edges = False
 g, data_qubit_locs, factory_ring = layouts.gen_layout_scalable(layout_type, m, n, factories, remove_edges)
@@ -31,8 +31,8 @@ t=2
 
 q = len(data_qubit_locs)
 print("number of data qubits: ", q)
-j = 8
-num_gates = 2 * q
+j = 20
+num_gates = 4 * q
 
 
 # j gates per layer on q qubits 
