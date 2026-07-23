@@ -1597,6 +1597,7 @@ def make_fine_sa_routing_animation(
             seq.append((frame, fine_routes, "moves"))
 
     fig, ax = plt.subplots(figsize=figsize)
+    #fig.subplots_adjust(right=0.82)
 
     def update(k: int):
         frame, fine_routes, sub = seq[k]

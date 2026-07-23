@@ -351,6 +351,66 @@ def check_duplicate_nodes_per_layer(schedule):
     # if no error was raised print that all is good
     return True
 
+def check_steiner_tree(steiner_dct: dict):
+    """
+    check that steiner branch doesn't overlap in initialize_steiner
+    """
+    all_branch_nodes = set()
+    all_vdp_nodes = set()
+
+    for key, (p1, p2) in steiner_dct.items():
+        all_vdp_nodes.update(p1)
+        all_branch_nodes.update(p2[1:])
+
+    for key, (p1, p2) in steiner_dct.items():
+        other_vdp_nodes = all_vdp_nodes.difference(p1)
+        other_branch_nodes = all_branch_nodes.difference(p2[1:])
+
+        for node in p2[1:]:
+            if node in other_vdp_nodes:
+                raise ValueError(
+                    f"Steiner branch overlaps with a VDP path at {node}"
+                )
+
+            if node in other_branch_nodes:
+                raise ValueError(
+                    f"Steiner branch overlaps with another Steiner branch at {node}"
+                )
+            
+    return True 
+
+def check_perturbation(teleport_dict: dict, vdp_dict: dict):
+   
+    """
+    check that no path overlap after perturbation 
+    """
+    all_occupied_nodes = set()
+
+    for key, path in vdp_dict.items():
+        all_occupied_nodes.update(path)
+
+    for key, (p1, p2) in teleport_dict.items():
+        all_occupied_nodes.update(p1)
+        if len(key) == 3:
+            all_occupied_nodes.update(p2[1:])
+
+    for key, (p1, p2) in teleport_dict.items():
+        if key[0] == "idle":
+            other_occupied_nodes = all_occupied_nodes.difference(p1)
+            for node in p1:
+                if node in other_occupied_nodes:
+                    raise ValueError(
+                        f" Idle path overlaps with occupied nodes ! The duplicate elements are {node}"
+                    )    
+        elif len(key) == 3:
+            other_occupied_nodes = all_occupied_nodes.difference(p1 + p2)
+            for node in p1 + p2:
+                if node in other_occupied_nodes:
+                    raise ValueError(
+                        f" Steiner branch overlaps with occupied nodes ! The duplicate elements are {node}"
+                    )
+    return True 
+
 
 def test_duplicate_nodes_fg(routes_by_layer):
     """
@@ -380,6 +440,51 @@ def test_duplicate_nodes_fg(routes_by_layer):
                     #print("Node ", node, "are duplicated in layer ", i)
                     return False
                 second_part_node.add(node)
+    return True
+
+
+def test_steiner_no_overlap_fg(schedule):
+    """
+    Per-layer overlap check for the fine-grained steiner teleport branches.
+
+    Each schedule entry carries:
+      - "vdp_dict": {gate: path} the two-phase routing paths of the layer, and
+      - "steiner":  {key: (p1, p2)} teleport trees, where p1 is a main routing
+        path and p2 is the branch attached to the T-junction p2[0] (which lies on
+        p1, i.e. on a routing path).
+
+    A valid layer requires every steiner branch to be node-disjoint from
+      (a) every other steiner branch, and
+      (b) every vdp_dict routing path,
+    with the sole exception of its own T-junction p2[0] (allowed to sit on a path
+    by construction). The routing paths are allowed to overlap each other across
+    phases (node capacity 2) and are not checked against one another here
+    (see test_duplicate_nodes_fg). Idle teleport / idle_back entries (string key
+    head) are skipped.
+    """
+    for i, entry in enumerate(schedule):
+        # every layer 
+        steiner = entry.get("steiner")
+        if not steiner:
+            continue
+        # every node occupied by the layer's routing paths
+        path_nodes = set()
+        for path in (entry.get("vdp_dict") or {}).values():
+            path_nodes.update(path)
+        branch_seen = set()
+        for key, (p1, p2) in steiner.items():
+            if isinstance(key[0], str):  # skip "idle" / "idle_back" entries
+                continue
+            if p2 is None:
+                continue
+            for node in p2[1:]:  # skip the T-junction (allowed to sit on a path)
+                if node in path_nodes:
+                    print("Steiner branch touches a routing path at", node, "in layer", i)
+                    return False
+                if node in branch_seen:
+                    print("Steiner branches overlap at", node, "in layer", i)
+                    return False
+                branch_seen.add(node)
     return True
 
 

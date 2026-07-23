@@ -15,9 +15,9 @@ from datetime import datetime
 
 seed = 45
 
-layout_type = "triple"
-m = 4
-n = 4
+layout_type = "single"
+m = 8
+n = 12
 factories = []
 remove_edges = False
 g, data_qubit_locs, factory_ring = layouts.gen_layout_scalable(layout_type, m, n, factories, remove_edges)
@@ -88,15 +88,17 @@ schedule, _ = router.optimize_layers(
         jump_harvesting = jump_harvesting,
         reduce_teleport = reduce_teleport,
         idle_move_type = idle_move_type,
+        vdp_type = "fine_grained",
+        overlap_type =  "strict_k",
+        max_overlap = 5,
         filename = filename,
         include_steiner_teleport = True,
         include_idle_teleport = False,
         reduce_init_steiner = True,
         reduce_init_idle = False, 
-        stimtest = True, 
-        vdp_type = "fine_grained",
-        overlap_type =  "strict_k",
+        stimtest = True,    
 )
+
 
 
 print("Len of schedule with teleport router: ", len(schedule))

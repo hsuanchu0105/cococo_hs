@@ -1130,7 +1130,11 @@ class BasicRouter:
             ]
             g_temp.remove_nodes_from(nodes_to_remove)
 
-            path = self.valid_path_method()(g_temp, gate[0], gate[1])
+            try:
+                path = self.valid_path_method()(g_temp, gate[0], gate[1])
+            except nx.NetworkXNoPath:
+                remainder_terminal_pairs.append(gate)
+                continue
             #print("Gate", gate, " : ", path )
             route_info = self.make_route_info(
                 gate,
@@ -1197,9 +1201,9 @@ class BasicRouter:
                     paths_current_layer.append(alt_path)
                     self.commit_route(layer_idx, alt_info)
                 except nx.NetworkXNoPath:
-                    logger.info(
-                        f"No path found for gate {gate}"
-                    )
+                    #logger.info(
+                    #    f"No path found for gate {gate}"
+                    #)
                     remainder_terminal_pairs.append(gate)
                         
             else:
@@ -1239,6 +1243,10 @@ class BasicRouter:
             only used for overlap_type="strict_k": the largest overlap component
             (number of mutually overlapping paths) that is still attempted.
             Ignored for "strict2", which is fixed at 2 by definition.
+
+        Returns (schedule, None), where `schedule` is a list of per-layer
+        {gate: path} dicts ordered by layer index (same shape as
+        find_total_vdp_layers_dyn); len(schedule) is the routing depth.
         """
         if self.use_dag and layout is None:
             raise ValueError(
@@ -1273,6 +1281,7 @@ class BasicRouter:
             dag = None
 
         fine_layer_idx = 0
+        stuck_counter = 0
 
         while remaining_layers:
             if self.use_dag:
@@ -1292,6 +1301,18 @@ class BasicRouter:
                 overlap_type,
                 max_overlap,
             )
+
+            # progress check: if a whole layer routed nothing (every gate deferred,
+            # e.g. a locked config produced by SA teleport moves), the routing cannot
+            # advance. Bail after enough consecutive stalls so calculate_cost scores
+            # this candidate as lock_penalty instead of looping forever. Mirrors the
+            # stuck_counter in find_total_vdp_layers_dyn.
+            if len(terminal_pairs_remainder) >= len(current_layer):
+                stuck_counter += 1
+                if stuck_counter > 10 * self.t:
+                    return None, None
+            else:
+                stuck_counter = 0
 
             if self.use_dag:
                 remaining_layers, dag = dag_helper.push_remainder_into_layers_dag(
@@ -1324,6 +1345,12 @@ class BasicRouter:
 
             if tst.check_path_on_logical_fg(self.routes_by_layer, layout = layout):
                 logger.info("paths do not occupy logical pos (:")
+
+        schedule = [
+            {gate: list(ri.path) for gate, ri in self.routes_by_layer[i].items()}
+            for i in sorted(self.routes_by_layer)
+        ]
+        return schedule, None
 
 
     def push_remainder_into_layers(
@@ -1732,6 +1759,7 @@ class TeleportationRouter(BasicRouter):
             other_paths = [
                 pos for keyy, path in vdp_dict.items() if keyy != key for pos in path
             ]  # collect all terminals occupied by other paths which is not the present one, this also captures potential idling paths.
+            
             g_temp_temp = g_temp.copy()
             g_temp_temp.remove_nodes_from(other_paths)
             # choose some node on the path randomly
@@ -1759,6 +1787,8 @@ class TeleportationRouter(BasicRouter):
             if steiner_init_type == "full_random":
                 for node_on_path in junction_candidates:  # loop in case a random node has no other reachable nodes
                     # determine all reachable nodes from that chosen node
+                    current_path_nodes = [node for node in path if node != node_on_path]
+                    g_temp_temp.remove_nodes_from(current_path_nodes)
                     reachable_nodes = list(
                         nx.single_source_shortest_path_length(
                             g_temp_temp, node_on_path
@@ -1802,6 +1832,9 @@ class TeleportationRouter(BasicRouter):
 
         #print("steiner dict: ", steiner_dct)
         
+        tst.check_steiner_tree(steiner_dct)
+
+
         return steiner_dct
 
     
@@ -1961,20 +1994,20 @@ class TeleportationRouter(BasicRouter):
             collect the occupied nodes except logical data qubits
             """
             path1, path2 = path_pair
-            nodes = []
+            nodes = set()
 
             if key[0] == "idle":
                 if path1 is not None:
-                    nodes += path1[1:]      # exclude idle source q
+                    nodes.update(path1[1:])     # exclude idle source q
                 return nodes
 
             # CNOT or T teleport
             if path1 is not None:
-                nodes += path1[1:-1]        # exclude logical endpoints
+                nodes.update(path1[1:-1])        # exclude logical endpoints
             if path2 is not None:
-                nodes += path2              # branch path
+                nodes.update(path2)            # branch path
 
-            return nodes
+            return list(nodes)
         
         if self.logical_pos_temp is None:
             raise RuntimeError(
@@ -1994,36 +2027,34 @@ class TeleportationRouter(BasicRouter):
             # each key got their own graph 
             g_temp = self.g.copy()
             g_temp.remove_nodes_from(self.factory_pos)
+
+            other_paths = [
+                    pos
+                    for keyy, path_pair in teleport_dct_update.items()
+                    if keyy != key_tree
+                    for pos in occupied_nodes_for_others(keyy, path_pair)
+                ]
+            
             # determine whether tree corresponds to an idle, a CNOT or T gate
             if key_tree[0] == "idle":
                 _, q, terminal = key_tree
                 g_temp.remove_nodes_from([x for x in self.logical_pos_temp if x != q])
                 # exclude nodes from other steiner or idle teleportation paths
-                other_paths = [
-                    pos
-                    for keyy, path_pair in teleport_dct_update.items()
-                    if keyy != key_tree
-                    for pos in occupied_nodes_for_others(keyy,path_pair)
-                ]
+                
                 
             elif len(key_tree) == 3:
                 (a, b, terminal) = key_tree
                 g_temp.remove_nodes_from([x for x in self.logical_pos_temp])
-                other_paths = [
-                    pos
-                    for keyy, path_pair in teleport_dct_update.items()
-                    if keyy != key_tree
-                    for pos in occupied_nodes_for_others(keyy, path_pair)
-                ]
+
+                # vdp path of current path 
+                for node in path1:
+                    if node != path2[0]:
+                        other_paths.append(node)
+
             elif len(key_tree) == 2:
                 (a, terminal) = key_tree
                 g_temp.remove_nodes_from([x for x in self.logical_pos_temp])
-                other_paths = [
-                    pos
-                    for keyy, path_pair in teleport_dct_update.items()
-                    if keyy != key_tree
-                    for pos in occupied_nodes_for_others(keyy, path_pair)
-                ]
+                
             else:
                 raise RuntimeError(
                     "Something is wrong with the allocation of keys in the steiner_dict"
@@ -2162,29 +2193,29 @@ class TeleportationRouter(BasicRouter):
             for key_tree, (path1, path2) in teleport_dct_update.items():
                 g_tt = self.g.copy()
                 g_tt.remove_nodes_from(self.factory_pos)
-                if key_tree[0] =="idle":
-                    _, q, terminal = key_tree
-                    g_tt.remove_nodes_from([x for x in self.logical_pos_temp if x != q])
-                elif len(key_tree) == 3:
-                    (a, b, terminal) = key_tree
-                    g_tt.remove_nodes_from([x for x in self.logical_pos_temp])
-                elif len(key_tree) == 2:
-                    (a, terminal) = key_tree
-                    g_tt.remove_nodes_from([x for x in self.logical_pos_temp])
-                else:
-                    raise ValueError("steiner dct keys are wrong.")
+
                 other_paths = [
                     pos
                     for keyy, path_pair in teleport_dct_update_second.items()
                     if keyy != key_tree
                     for pos in occupied_nodes_for_others(keyy, path_pair)
                 ]
-                #if terminal in other_paths:
-                #    other_paths.remove(terminal)
-                #if path2 and path2[0] in other_paths:
-                #    other_paths.remove(path2[0])
-                #if terminal in other_paths:
-                #    other_paths.remove(terminal)
+                
+                if key_tree[0] =="idle":
+                    _, q, terminal = key_tree
+                    g_tt.remove_nodes_from([x for x in self.logical_pos_temp if x != q])
+                elif len(key_tree) == 3:
+                    (a, b, terminal) = key_tree
+                    g_tt.remove_nodes_from([x for x in self.logical_pos_temp])
+                    for node in path1:
+                        if node != path2[0]:
+                            other_paths.append(node)
+                elif len(key_tree) == 2:
+                    (a, terminal) = key_tree
+                    g_tt.remove_nodes_from([x for x in self.logical_pos_temp])
+                else:
+                    raise ValueError("steiner dct keys are wrong.")
+                
                 protected = {terminal}
                 if path2:
                     protected.add(path2[0])
@@ -2258,6 +2289,9 @@ class TeleportationRouter(BasicRouter):
             g_tt.remove_nodes_from(self.factory_pos)
 
         #print("teleport dct after perturbation: ", teleport_dct_update_second)
+        
+        tst.check_perturbation(teleport_dct_update_second, vdp_dict)
+
         return teleport_dct_update_second, g_tt
     @staticmethod
     def replace_pos(lst: list[tuple[pos, pos] | pos], old: pos, new: pos):
@@ -2296,16 +2330,35 @@ class TeleportationRouter(BasicRouter):
                     factory_times,
                     layout,
                 )  # initially the self.logical pos can be used. later you need a logical_pos outside of self
-            elif vdp_type == "fine-grained":
-                schedule, _ = self.find_total_fine_grained_vdp_dyn(
-                    layers,
-                    logical_pos,
-                    factory_times,
-                    overlap_type,
-                    max_overlap,
-                    layout,
-                    testing = True,
+            elif vdp_type == "fine_grained":
+                # Cost measurement only: isolate the three fine-grained routing
+                # dicts so find_total_fine_grained_vdp_dyn (which clears and rebuilds
+                # them) leaves the committed routing state untouched. Fresh dicts
+                # match the constructor factories.
+                _saved = (
+                    self.routes_by_layer,
+                    self.overlap_graphs,
+                    self.node_to_gates_by_layer,
                 )
+                self.routes_by_layer = defaultdict(dict)
+                self.overlap_graphs = defaultdict(nx.Graph)
+                self.node_to_gates_by_layer = defaultdict(lambda: defaultdict(set))
+                try:
+                    schedule, _ = self.find_total_fine_grained_vdp_dyn(
+                        layers,
+                        logical_pos,
+                        factory_times,
+                        overlap_type,
+                        max_overlap,
+                        layout,
+                        testing = False,
+                    )
+                finally:
+                    (
+                        self.routes_by_layer,
+                        self.overlap_graphs,
+                        self.node_to_gates_by_layer,
+                    ) = _saved
             else:
                 raise NotImplementedError(
                 "Other vdp types are not implemented yet."
@@ -2481,7 +2534,7 @@ class TeleportationRouter(BasicRouter):
             # 2. compute the crossing metric for next_layer
             # try:
             layers_for_metric = next_layers_copy[:k_lookahead]
-            candidate_cost, schedule = self.calculate_cost(self.metric, layers_for_metric, logical_pos_temp, factory_times_copy, layout_mod)
+            candidate_cost, schedule = self.calculate_cost(self.metric,  vdp_type, overlap_type, max_overlap, layers_for_metric, logical_pos_temp, factory_times_copy, layout_mod)
             #print("move type list temp", move_type_lst_temp)
 
             # except ValueError:
@@ -3563,8 +3616,7 @@ class TeleportationRouter(BasicRouter):
         # test whether something overlapping
         if vdp_type == "fine_grained":
             # the coarse duplicate check would flag the intended two-phase overlaps,
-            # so check like-phase disjointness instead. (steiner branches are mutually
-            # disjoint and avoid all paths by construction; they are not covered here.)
+            # so check like-phase disjointness instead.
             if tst.test_duplicate_nodes_fg(self.routes_by_layer):
                 logger.info(
                     "No like-phase duplicates in any fine-grained layer - all good(:"
@@ -3572,6 +3624,15 @@ class TeleportationRouter(BasicRouter):
             else:
                 warnings.warn(
                     "Fine-grained routing has like-phase duplicate nodes in some layer!"
+                )
+            # steiner teleport branches must be mutually disjoint within a layer.
+            if tst.test_steiner_no_overlap_fg(schedule):
+                logger.info(
+                    "No overlapping steiner branches in any fine-grained layer - all good(:"
+                )
+            else:
+                warnings.warn(
+                    "Fine-grained schedule has overlapping steiner branches in some layer!"
                 )
         elif tst.check_duplicate_nodes_per_layer(schedule):
             logger.info(
