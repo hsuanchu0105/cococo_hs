@@ -363,11 +363,12 @@ def check_steiner_tree(steiner_dct: dict):
         all_branch_nodes.update(p2[1:])
 
     for key, (p1, p2) in steiner_dct.items():
-        other_vdp_nodes = all_vdp_nodes.difference(p1)
+        #other_vdp_nodes = all_vdp_nodes.difference(p1)
         other_branch_nodes = all_branch_nodes.difference(p2[1:])
 
+        # this steiner branch cannot touch other steiner branch and all vdp nodes 
         for node in p2[1:]:
-            if node in other_vdp_nodes:
+            if node in all_vdp_nodes:
                 raise ValueError(
                     f"Steiner branch overlaps with a VDP path at {node}"
                 )
@@ -391,7 +392,7 @@ def check_perturbation(teleport_dict: dict, vdp_dict: dict):
 
     for key, (p1, p2) in teleport_dict.items():
         all_occupied_nodes.update(p1)
-        if len(key) == 3:
+        if len(key) == 3 and key[0] != "idle":
             all_occupied_nodes.update(p2[1:])
 
     for key, (p1, p2) in teleport_dict.items():

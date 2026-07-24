@@ -2060,11 +2060,6 @@ class TeleportationRouter(BasicRouter):
                     "Something is wrong with the allocation of keys in the steiner_dict"
                 )
 
-            # a terminal can be placed on the path. in this case you are NOT allowed to remove it! the above somehow sometimes add terminal, hence remove it again
-            #if terminal in other_paths:
-            #    other_paths.remove(terminal)
-            #if path2 and path2[0] in other_paths:
-            #    other_paths.remove(path2[0])
 
             protected = {terminal}
             if path2:
@@ -3136,10 +3131,8 @@ class TeleportationRouter(BasicRouter):
                 schedule_temp = schedule_temp_temp[-1]
 
             # find optimal steiner tree(s) for current layer
-            
             steiner_dct = {}
             idle_move_dct = {}
-
 
             layers_steiner = None
             k_steiner = None 
@@ -3153,7 +3146,6 @@ class TeleportationRouter(BasicRouter):
                 layers_idle = layers
                 k_idle = k_lookahead 
             
-
             if include_steiner_teleport:
                 steiner_dct = self.initialize_steiner(
                     vdp_dict, steiner_init_type, layers=layers_steiner, k_lookahead=k_steiner,
@@ -3209,8 +3201,8 @@ class TeleportationRouter(BasicRouter):
 
             print("best_steiner_init: ", best_steiner_init)
             print("best_idle_init: ", best_idle_init)
-            if best_idle_init:
-                print("len of best idle init", len(best_idle_init))
+            #if best_idle_init:
+            #    print("len of best idle init", len(best_idle_init))
 
             # do not use a steiner if the SA could not find a good best_steiner. then it is set to none
             if not best_steiner_init and not best_idle_init:  # break earlier, similar to above
@@ -3612,18 +3604,16 @@ class TeleportationRouter(BasicRouter):
                 )
             else:
                 warnings.warn("Stim test failed: Pushing gates causes trouble):")
-
-        # test whether something overlapping
+        # fine-grained test 
         if vdp_type == "fine_grained":
-            # the coarse duplicate check would flag the intended two-phase overlaps,
-            # so check like-phase disjointness instead.
+            # check that two-phase routing is valid 
             if tst.test_duplicate_nodes_fg(self.routes_by_layer):
                 logger.info(
-                    "No like-phase duplicates in any fine-grained layer - all good(:"
+                    "No shared-phase nodes in any fine-grained layer - all good(:"
                 )
             else:
                 warnings.warn(
-                    "Fine-grained routing has like-phase duplicate nodes in some layer!"
+                    "Fine-grained routing has shared-nodes in some layer!"
                 )
             # steiner teleport branches must be mutually disjoint within a layer.
             if tst.test_steiner_no_overlap_fg(schedule):
@@ -3634,6 +3624,7 @@ class TeleportationRouter(BasicRouter):
                 warnings.warn(
                     "Fine-grained schedule has overlapping steiner branches in some layer!"
                 )
+        # coarse-grained test 
         elif tst.check_duplicate_nodes_per_layer(schedule):
             logger.info(
                 "No duplicates found in any layer of the schedule - hence all good(:"
