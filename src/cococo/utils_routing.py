@@ -1989,6 +1989,11 @@ class TeleportationRouter(BasicRouter):
 
         For each path a new location of the 2nd (3rd terminal) is updated randomly.
         """
+
+        # ------------------------------------------------------------------
+        # helpers (close over `self` / `vdp_dict`)
+        # ------------------------------------------------------------------
+
         def occupied_nodes_for_others(key, path_pair):
             """
             collect the occupied nodes except logical data qubits
@@ -2008,69 +2013,68 @@ class TeleportationRouter(BasicRouter):
                 nodes.update(path2)            # branch path
 
             return list(nodes)
-        
-        if self.logical_pos_temp is None:
-            raise RuntimeError(
-                "Need to initialize logical pos temp properly in a summarizing method."
-            )   
 
-        teleport_dct_update = teleport_dct.copy()
+        def classify(key_tree, bad_key_error):
+            """
+            Split a teleport key into ``(kind, source, terminal)``.
 
-        if not teleport_dct_update:
-            g_tt = self.g.copy()
-        # used_nodes = set()
-        new_terminal = None
-
-        # find perturbation of each item in teleport_dct 
-        for key_tree, (path1, path2) in teleport_dct.items():
-            
-            # each key got their own graph 
-            g_temp = self.g.copy()
-            g_temp.remove_nodes_from(self.factory_pos)
-
-            other_paths = [
-                    pos
-                    for keyy, path_pair in teleport_dct_update.items()
-                    if keyy != key_tree
-                    for pos in occupied_nodes_for_others(keyy, path_pair)
-                ]
-            
-            # determine whether tree corresponds to an idle, a CNOT or T gate
+            ``("idle", q, t) -> ("idle", q, t)``, ``(a, b, t) -> ("cnot", None, t)``,
+            ``(a, t) -> ("t", None, t)``.  `bad_key_error` is raised for anything
+            else (the two passes historically raise different exception types).
+            """
             if key_tree[0] == "idle":
                 _, q, terminal = key_tree
-                g_temp.remove_nodes_from([x for x in self.logical_pos_temp if x != q])
-                # exclude nodes from other steiner or idle teleportation paths
-                
-                
-            elif len(key_tree) == 3:
-                (a, b, terminal) = key_tree
-                g_temp.remove_nodes_from([x for x in self.logical_pos_temp])
+                return "idle", q, terminal
+            if len(key_tree) == 3:
+                _, _, terminal = key_tree
+                return "cnot", None, terminal
+            if len(key_tree) == 2:
+                _, terminal = key_tree
+                return "t", None, terminal
+            raise bad_key_error
 
-                # vdp path of current path 
-                for node in path1:
-                    if node != path2[0]:
-                        other_paths.append(node)
+        def build_constraint_graph(
+            key_tree, kind, source, terminal, path1, path2, siblings
+        ):
+            """
+            The graph this entry's branch may be routed through: everything is
+            removed that it is not allowed to touch.
 
-            elif len(key_tree) == 2:
-                (a, terminal) = key_tree
-                g_temp.remove_nodes_from([x for x in self.logical_pos_temp])
-                
+            `siblings` is the dict whose *other* entries block nodes; it is the dict
+            being built up by the current pass, so later entries see earlier updates.
+            """
+            g = self.g.copy()
+            g.remove_nodes_from(self.factory_pos)
+
+            # occupied ancillas from other paths 
+            other_paths = [
+                pos
+                for keyy, path_pair in siblings.items()
+                if keyy != key_tree
+                for pos in occupied_nodes_for_others(keyy, path_pair)
+            ]
+
+            # data qubits are obstacles -- except the idle qubit that is moving
+            if kind == "idle":
+                g.remove_nodes_from([x for x in self.logical_pos_temp if x != source])
             else:
-                raise RuntimeError(
-                    "Something is wrong with the allocation of keys in the steiner_dict"
-                )
-
+                g.remove_nodes_from([x for x in self.logical_pos_temp])
+                # NOTE: the gate's own path1 is deliberately left in the graph here.
+                # Removing it up front would also remove every candidate T-junction,
+                # so no junction other than the current one could ever be used as a
+                # dijkstra source.  `shortest_branch` strips path1 per candidate
+                # instead -- that keeps every junction usable while still forbidding
+                # the branch from running along path1.  The `node not in path_con`
+                # guard in the vdp sweep below is what keeps path1 alive here.
 
             protected = {terminal}
             if path2:
                 protected.add(path2[0])
             other_paths = [node for node in other_paths if node not in protected]
+            g.remove_nodes_from(other_paths)
 
-            #g_temp_temp = g_temp.copy()
-            g_temp.remove_nodes_from(other_paths)
-
-            
-            # remove nodes from vdp dict (the tree is not allowed to be on or cross another path)
+            # also need to delete paths in vdp_dict
+            path_con = path1 + path2 if path2 else path1
             for path_label, path in vdp_dict.items():
                 if isinstance(path_label, tuple) and path_label[0] == "idle_back":
                     nodes_to_delete = path[1:]  # for idle move you need to delete more
@@ -2079,215 +2083,199 @@ class TeleportationRouter(BasicRouter):
                 elif isinstance(path_label[0], int):  # t
                     nodes_to_delete = path[1:]
                 for node in nodes_to_delete:
-                    if path2:
-                        path_con = path1 + path2
-                    else:
-                        path_con = path1
-                    if (
-                        node in g_temp.nodes() and node not in path_con
-                    ):  # {terminal, path2[0]}
-                        g_temp.remove_node(node)
+                    if node in g.nodes() and node not in path_con:
+                        g.remove_node(node)
 
-            # find "neighborhood" of the terminal
-            neighborhood = set(
-                nx.single_source_shortest_path_length(
-                    g_temp, terminal, cutoff=radius
-                ).keys()
+            return g
+
+        def allowed_starts(key_tree, path1):
+            """
+            Candidate T-junction nodes on the gate's own path.  In fine-grained mode
+            the junction may only sit in the committed ancilla's region.
+            """
+            allowed = None
+            if len(key_tree) == 3 and self.fine_allowed_junctions:
+                allowed = self.fine_allowed_junctions.get((key_tree[0], key_tree[1]))
+            if allowed is None:
+                return path1[1:-1]
+            return [n for n in path1[1:-1] if n in allowed]
+
+        def shortest_branch(g_full, starts, target, path1):
+            """
+            Shortest branch to `target` over every allowed junction, such that the
+            branch meets `path1` only at its own start node.
+
+            `g_full` still contains `path1`.  We strip `path1` once, then re-attach
+            one candidate junction at a time: dijkstra started at `j` then cannot
+            step onto any other path1 node, because none of them are in the graph.
+            So `branch & set(path1) == {j}` holds by construction -- no cycle can
+            form when the branch is glued onto path1 -- while every candidate is
+            still reachable as a source.
+            """
+            if target in set(path1):
+                # The terminal already lies on the gate's own path, so it is part of
+                # the tree already and needs no branch -- same convention as
+                # `on_path_random` in initialize_steiner, which stores [terminal].
+                # Routing a real branch here would leave path1 and rejoin it at the
+                # terminal, i.e. close a cycle.  Only legal if the terminal is itself
+                # an allowed junction.
+                return [target] if target in set(starts) else None
+
+            best = None
+            g = g_full.copy()  # one copy total, not one per candidate
+            g.remove_nodes_from(path1)  # target is not on path1, so it survives
+
+            for j in starts:
+                if j not in g_full:
+                    # candidate removed for some other reason (e.g. occupied by
+                    # another route), so it cannot serve as a junction
+                    continue
+
+                neighbours = [n for n in g_full.neighbors(j) if n in g]
+                g.add_node(j)
+                g.add_edges_from((j, n) for n in neighbours)
+                try:
+                    branch = nx.dijkstra_path(g, j, target)
+                    if best is None or len(branch) < len(best):
+                        best = branch
+                except (nx.NetworkXNoPath, nx.NodeNotFound):
+                    pass
+                g.remove_node(j)  # drops j and its edges -> g is restored
+
+            return best
+
+        def reinsert(dct, key_tree, kind, source, terminal_new, path1, branch):
+            """Drop the old key and store the entry under its (possibly new) terminal."""
+            dct.pop(key_tree, None)
+            if kind == "idle":
+                dct[("idle", source, terminal_new)] = (branch, None)
+            elif kind == "cnot":
+                a, b, _ = key_tree
+                dct[(a, b, terminal_new)] = (path1, branch)
+            else:  # single-qubit / T teleport
+                a, _ = key_tree
+                dct[(a, terminal_new)] = (path1, branch)
+
+        # ------------------------------------------------------------------
+
+        if self.logical_pos_temp is None:
+            raise RuntimeError(
+                "Need to initialize logical pos temp properly in a summarizing method."
             )
-            neighborhood = sorted(neighborhood)
-            #print("neighborhood", neighborhood)
-            
-            #print("g_temp", g_temp)
-            
-            # the single source shortest path,... ensures that only reachable nodes are included
-            # choose one of them
-            if len(neighborhood) == 1:  # if only one neighbor, i.e. the terminal itself
-                # new_terminal = None #to skip the updating of the root node below.
-                continue
-            if key_tree[0] == "idle":
-                path_terminal = None
-                while True:
-                    new_terminal = random.choice(list(neighborhood))
-                    if new_terminal == terminal:  # do not want same terminal again
-                        continue
-                    try:
-                        path_terminal = nx.dijkstra_path(
-                            g_temp, q, new_terminal
-                        )  
-                    except nx.NetworkXNoPath:
-                        warnings.warn(
-                            "If this is called you need to check why this is happening."
-                        )
-                    if path_terminal:
-                        break
-            else:
-                path_terminal = None
-                while True:
-                    new_terminal = random.choice(list(neighborhood))
-                    if new_terminal == terminal:  # do not want same terminal again
-                        continue
-                    try:
-                        #print("new terminal: ", new_terminal)
-                        path_terminal = nx.dijkstra_path(g_temp, path2[0], new_terminal)  # path2[0] is the connecting node on the path
-                    except nx.NetworkXNoPath:
-                        warnings.warn(
-                            "If this is called you need to check why this is happening."
-                        )
-                    if path_terminal:
-                        break
 
-                #!TODO should i skip this since we do it globally afterwards again?
-                # (A) loop to possibly find shorter path_terminal
-                # in fine-grained mode the T-junction may only sit in the committed
-                # ancilla's region, so restrict the candidate starting nodes.
-                allowed = None
-                if len(key_tree) == 3 and self.fine_allowed_junctions:
-                    allowed = self.fine_allowed_junctions.get(
-                        (key_tree[0], key_tree[1])
-                    )
-                starts = (
-                    path1[1:-1]
-                    if allowed is None
-                    else [n for n in path1[1:-1] if n in allowed]
+        teleport_dct_update = teleport_dct.copy()
+
+        if not teleport_dct_update:
+            g_tt = self.g.copy()
+
+        new_terminal = None
+
+        # ------------------------------------------------------------------
+        # (A) move every terminal to a random node in its radius-neighbourhood
+        # ------------------------------------------------------------------
+        for key_tree, (path1, path2) in teleport_dct.items():
+            kind, source, terminal = classify(
+                key_tree,
+                RuntimeError(
+                    "Something is wrong with the allocation of keys in the steiner_dict"
+                ),
+            )
+
+            g_temp = build_constraint_graph(
+                key_tree, kind, source, terminal, path1, path2,
+                siblings=teleport_dct_update, 
+            )
+
+            # reachable nodes from terminal
+            neighborhood = sorted(
+                set(
+                    nx.single_source_shortest_path_length(
+                        g_temp, terminal, cutoff=radius
+                    ).keys()
                 )
-                paths_lst_temp = []  # collect all paths from the allowed starts to new_terminal
-                for node_on_path in starts:
-                    try:
-                        path_temp = nx.dijkstra_path(
-                            g_temp, node_on_path, new_terminal
+            )
+            if len(neighborhood) == 1:  # only the terminal itself -> nothing to move
+                continue
+
+            # Draw a new terminal and route to it.  For a steiner tree every allowed
+            # junction is tried, so the T-junction moves along with the terminal.
+            starts = None if kind == "idle" else allowed_starts(key_tree, path1)
+            path_terminal = None
+            tried = set()
+            while True:
+                new_terminal = random.choice(list(neighborhood))
+                tried.add(new_terminal)
+                if new_terminal != terminal:  # do not want same terminal again
+                    if kind == "idle":
+                        # the idle corridor is replaced wholesale, so it may reuse
+                        # its own old nodes -- no path1 restriction here
+                        try:
+                            path_terminal = nx.dijkstra_path(g_temp, source, new_terminal)
+                        except nx.NetworkXNoPath:
+                            warnings.warn(
+                                "If this is called you need to check why this is happening."
+                            )
+                    else:
+                        path_terminal = shortest_branch(
+                            g_temp, starts, new_terminal, path1
                         )
-                        paths_lst_temp.append(path_temp)
-                    except (nx.NetworkXNoPath, nx.NodeNotFound):
-                        # NodeNotFound: a start node removed from g_temp (e.g. an
-                        # overlap-block node of path1 occupied by another route)
-                        pass
-                if paths_lst_temp:
-                    path_terminal = min(paths_lst_temp, key=len)
+                    if path_terminal:
+                        break
+                if len(tried) >= len(neighborhood):
+                    # every reachable terminal tried and none routable -> give up on
+                    # this entry rather than spinning forever
+                    break
 
-            # delete old entry and add new with updated key
-            teleport_dct_update.pop(key_tree, None)
-            if key_tree[0] == "idle":
-                _, q, terminal = key_tree
-                new_key_tree = ("idle", q, new_terminal)
-                teleport_dct_update[new_key_tree] = (path_terminal, None)
-            elif len(key_tree) == 3:
-                (a, b, terminal) = key_tree
-                new_key_tree = (a, b, new_terminal)
-                teleport_dct_update[new_key_tree] = (path1, path_terminal)
-            elif len(key_tree) == 2:
-                (a, terminal) = key_tree
-                new_key_tree = (a, new_terminal)
-                teleport_dct_update[new_key_tree] = (path1, path_terminal)
-            # remove_branch_nodes += path_terminal
+            if not path_terminal:
+                continue
 
-        # it is possible that (A) does not capture everything, as the terminal path may change in a later iteration and thus make even shorter paths possible.
-        if (
-            new_terminal is not None
-        ):  # if the neighborhood has 1 item only, the above breaks. then we do not want to do this reduction.
+            reinsert(
+                teleport_dct_update, key_tree, kind, source, new_terminal, path1, path_terminal
+            )
+
+        # ------------------------------------------------------------------
+        # (B) (A) may miss shortenings, because a terminal moved in a later
+        #     iteration can open up a shorter branch for an earlier entry.
+        # ------------------------------------------------------------------
+        if new_terminal is not None:
+            # if the neighborhood had 1 item only, (A) never moved anything and we
+            # do not want this reduction.
             teleport_dct_update_second = teleport_dct_update.copy()
             for key_tree, (path1, path2) in teleport_dct_update.items():
-                g_tt = self.g.copy()
-                g_tt.remove_nodes_from(self.factory_pos)
+                kind, source, terminal = classify(
+                    key_tree, ValueError("steiner dct keys are wrong.")
+                )
 
-                other_paths = [
-                    pos
-                    for keyy, path_pair in teleport_dct_update_second.items()
-                    if keyy != key_tree
-                    for pos in occupied_nodes_for_others(keyy, path_pair)
-                ]
-                
-                if key_tree[0] =="idle":
-                    _, q, terminal = key_tree
-                    g_tt.remove_nodes_from([x for x in self.logical_pos_temp if x != q])
-                elif len(key_tree) == 3:
-                    (a, b, terminal) = key_tree
-                    g_tt.remove_nodes_from([x for x in self.logical_pos_temp])
-                    for node in path1:
-                        if node != path2[0]:
-                            other_paths.append(node)
-                elif len(key_tree) == 2:
-                    (a, terminal) = key_tree
-                    g_tt.remove_nodes_from([x for x in self.logical_pos_temp])
-                else:
-                    raise ValueError("steiner dct keys are wrong.")
-                
-                protected = {terminal}
-                if path2:
-                    protected.add(path2[0])
-                other_paths = [node for node in other_paths if node not in protected]
+                g_tt = build_constraint_graph(
+                    key_tree, kind, source, terminal, path1, path2,
+                    siblings=teleport_dct_update_second, 
+                )
 
-                #g_temp_temp = g_temp.copy()
-                g_tt.remove_nodes_from(other_paths)
-                for path_label, path in vdp_dict.items():
-                    if isinstance(path_label, tuple) and path_label[0] == "idle_back":
-                        nodes_to_delete = path[1:]  
-                    else:
-                        nodes_to_delete = path[1:-1]
-                    for node in nodes_to_delete:
-                        if path2:
-                            path_con = path1 + path2
-                        else:
-                            path_con = path1
-                        if (
-                            node in g_tt.nodes() and node not in path_con
-                        ):  # {terminal, path2[0]}:
-                            g_tt.remove_node(node)
-                paths_lst_temp = (
-                    []
-                )  # collect all paths from path1[1:-1] to new_terminal
-                if key_tree[0] == "idle":                             
+                if kind == "idle":
                     try:
-                        path_temp = nx.dijkstra_path(
-                            g_tt, q, terminal
-                        )
-                        paths_lst_temp.append(path_temp)
+                        path_terminal = nx.dijkstra_path(g_tt, source, terminal)
                     except nx.NetworkXNoPath:
-                        pass
+                        path_terminal = None
                 else:
-                    # same fine-grained T-junction restriction as in loop (A)
-                    allowed = None
-                    if len(key_tree) == 3 and self.fine_allowed_junctions:
-                        allowed = self.fine_allowed_junctions.get(
-                            (key_tree[0], key_tree[1])
-                        )
-                    starts = (
-                        path1[1:-1]
-                        if allowed is None
-                        else [n for n in path1[1:-1] if n in allowed]
+                    path_terminal = shortest_branch(
+                        g_tt, allowed_starts(key_tree, path1), terminal, path1
                     )
-                    for node_on_path in starts:
-                        try:
-                            path_temp = nx.dijkstra_path(
-                                g_tt, node_on_path, terminal
-                            )
-                            paths_lst_temp.append(path_temp)
-                        except (nx.NetworkXNoPath, nx.NodeNotFound):
-                            pass
-                if paths_lst_temp:
-                    path_terminal = min(paths_lst_temp, key=len)
-                    teleport_dct_update_second.pop(key_tree, None)
-                    if key_tree[0] == "idle":
-                        _, q, terminal = key_tree
-                        new_key_tree = ("idle", q, terminal)
-                        teleport_dct_update_second[new_key_tree] = (path_terminal, None)
-                    elif len(key_tree) == 3:
-                        (a, b, terminal) = key_tree
-                        new_key_tree = (a, b, terminal)
-                        teleport_dct_update_second[new_key_tree] = (path1, path_terminal)
-                    elif len(key_tree) == 2:
-                        (a, terminal) = key_tree
-                        new_key_tree = (a, terminal)
-                        teleport_dct_update_second[new_key_tree] = (path1, path_terminal)
+
+                if path_terminal:
+                    # same terminal as before -- only the branch is replaced
+                    reinsert(
+                        teleport_dct_update_second, key_tree, kind, source,
+                        terminal, path1, path_terminal,
+                    )
         else:
             teleport_dct_update_second = teleport_dct_update
             g_tt = self.g.copy()
             g_tt.remove_nodes_from(self.factory_pos)
 
-        #print("teleport dct after perturbation: ", teleport_dct_update_second)
-        
         tst.check_perturbation(teleport_dct_update_second, vdp_dict)
 
         return teleport_dct_update_second, g_tt
+
     @staticmethod
     def replace_pos(lst: list[tuple[pos, pos] | pos], old: pos, new: pos):
         """
@@ -3199,8 +3187,8 @@ class TeleportationRouter(BasicRouter):
                 )
                 improvement_history.append((best_cost, cost_history[0]))
 
-            print("best_steiner_init: ", best_steiner_init)
-            print("best_idle_init: ", best_idle_init)
+            #print("best_steiner_init: ", best_steiner_init)
+            #print("best_idle_init: ", best_idle_init)
             #if best_idle_init:
             #    print("len of best idle init", len(best_idle_init))
 

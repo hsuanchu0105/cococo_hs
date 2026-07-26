@@ -1,10 +1,9 @@
-"""Clarified rewrite of ``TeleportationRouter.perturbation``.
+"""Clarified rewrite of ``TeleportationRouter.perturbation``, with a mobile T-junction.
 
-This module holds a standalone, behaviour-identical version of the SA
-neighbour-generator that currently lives inline in
-``cococo/utils_routing.py`` (``TeleportationRouter.perturbation``).  The
-original stays in place and active; this one is meant to be readable and can be
-bound onto the class for A/B comparison::
+This module holds a standalone version of the SA neighbour-generator that
+currently lives inline in ``cococo/utils_routing.py``
+(``TeleportationRouter.perturbation``).  The original stays in place and active;
+this one is meant to be readable and can be bound onto the class::
 
     import cococo.perturbation_refactored as pr
     utils.TeleportationRouter.perturbation = pr.perturbation
@@ -22,6 +21,21 @@ Structure of the algorithm (unchanged, just de-duplicated):
 Both passes share the constraint-graph construction, the idle / CNOT / T key
 branching, the ``fine_allowed_junctions`` restriction and the pop-then-reinsert
 update; those are the helpers below.
+
+**This is NOT behaviour-identical to the inline original.**  The original adds
+the gate's own ``path1`` to ``other_paths`` and deletes it before routing, which
+also deletes every candidate T-junction -- so the "try all junctions" loop only
+ever saw the junction it started with (all others raised ``NodeNotFound``, which
+the ``except`` clause swallowed) and the junction could never move.  Here
+``path1`` stays in the constraint graph and is stripped per candidate inside
+``shortest_branch`` instead, so:
+
+* every allowed junction is usable as a start node -- the junction moves too;
+* the branch still cannot run along ``path1``: it meets it only at its own start
+  node, so gluing branch onto ``path1`` can never close a cycle.
+
+Invariant worth asserting on the result, for every CNOT/T entry ``(p1, p2)``:
+``p2[0] in p1`` and ``set(p2[1:]) & set(p1) == set()``.
 """
 
 import networkx as nx
@@ -107,12 +121,13 @@ def perturbation(self, teleport_dct: dict, radius: int, vdp_dict: dict):
             g.remove_nodes_from([x for x in self.logical_pos_temp if x != source])
         else:
             g.remove_nodes_from([x for x in self.logical_pos_temp])
-            if kind == "cnot":
-                # this gate's own vdp path is blocked too, apart from the
-                # T-junction the branch hangs off
-                for node in path1:
-                    if node != path2[0]:
-                        other_paths.append(node)
+            # NOTE: the gate's own path1 is deliberately left in the graph here.
+            # Removing it up front would also remove every candidate T-junction,
+            # so no junction other than the current one could ever be used as a
+            # dijkstra source.  `shortest_branch` strips path1 per candidate
+            # instead -- that keeps every junction usable while still forbidding
+            # the branch from running along path1.  The `node not in path_con`
+            # guard in the vdp sweep below is what keeps path1 alive here.
 
         protected = {terminal}
         if path2:
@@ -147,17 +162,49 @@ def perturbation(self, teleport_dct: dict, radius: int, vdp_dict: dict):
             return path1[1:-1]
         return [n for n in path1[1:-1] if n in allowed]
 
-    def shortest_branch(g, starts, target):
-        """Shortest branch from any allowed start to `target`, or None."""
-        candidates = []
-        for node_on_path in starts:
+    def shortest_branch(g_full, starts, target, path1):
+        """
+        Shortest branch to `target` over every allowed junction, such that the
+        branch meets `path1` only at its own start node.
+
+        `g_full` still contains `path1`.  We strip `path1` once, then re-attach
+        one candidate junction at a time: dijkstra started at `j` then cannot
+        step onto any other path1 node, because none of them are in the graph.
+        So `branch & set(path1) == {j}` holds by construction -- no cycle can
+        form when the branch is glued onto path1 -- while every candidate is
+        still reachable as a source.
+        """
+        if target in set(path1):
+            # The terminal already lies on the gate's own path, so it is part of
+            # the tree already and needs no branch -- same convention as
+            # `on_path_random` in initialize_steiner, which stores [terminal].
+            # Routing a real branch here would leave path1 and rejoin it at the
+            # terminal, i.e. close a cycle.  Only legal if the terminal is itself
+            # an allowed junction.
+            return [target] if target in set(starts) else None
+
+        best = None
+        g = g_full.copy()  # one copy total, not one per candidate
+        g.remove_nodes_from(path1)  # target is not on path1, so it survives
+
+        for j in starts:
+            if j not in g_full:
+                # candidate removed for some other reason (e.g. occupied by
+                # another route), so it cannot serve as a junction
+                continue
+
+            neighbours = [n for n in g_full.neighbors(j) if n in g]
+            g.add_node(j)
+            g.add_edges_from((j, n) for n in neighbours)
             try:
-                candidates.append(nx.dijkstra_path(g, node_on_path, target))
+                branch = nx.dijkstra_path(g, j, target)
+                if best is None or len(branch) < len(best):
+                    best = branch
             except (nx.NetworkXNoPath, nx.NodeNotFound):
-                # NodeNotFound: a start node removed from the graph (e.g. an
-                # overlap-block node of path1 occupied by another route)
                 pass
-        return min(candidates, key=len) if candidates else None
+            g.remove_node(j)  # drops j and its edges -> g is restored
+
+        return best
 
     def reinsert(dct, key_tree, kind, source, terminal_new, path1, branch):
         """Drop the old key and store the entry under its (possibly new) terminal."""
@@ -201,7 +248,7 @@ def perturbation(self, teleport_dct: dict, radius: int, vdp_dict: dict):
             siblings=teleport_dct_update, 
         )
 
-        # single_source_shortest_path_length keeps only reachable nodes
+        # reachable nodes from terminal
         neighborhood = sorted(
             set(
                 nx.single_source_shortest_path_length(
@@ -212,29 +259,37 @@ def perturbation(self, teleport_dct: dict, radius: int, vdp_dict: dict):
         if len(neighborhood) == 1:  # only the terminal itself -> nothing to move
             continue
 
-        # draw a new terminal that is actually reachable from the branch root
-        branch_root = source if kind == "idle" else path2[0]
+        # Draw a new terminal and route to it.  For a steiner tree every allowed
+        # junction is tried, so the T-junction moves along with the terminal.
+        starts = None if kind == "idle" else allowed_starts(key_tree, path1)
         path_terminal = None
+        tried = set()
         while True:
             new_terminal = random.choice(list(neighborhood))
-            if new_terminal == terminal:  # do not want same terminal again
-                continue
-            try:
-                path_terminal = nx.dijkstra_path(g_temp, branch_root, new_terminal)
-            except nx.NetworkXNoPath:
-                warnings.warn(
-                    "If this is called you need to check why this is happening."
-                )
-            if path_terminal:
+            tried.add(new_terminal)
+            if new_terminal != terminal:  # do not want same terminal again
+                if kind == "idle":
+                    # the idle corridor is replaced wholesale, so it may reuse
+                    # its own old nodes -- no path1 restriction here
+                    try:
+                        path_terminal = nx.dijkstra_path(g_temp, source, new_terminal)
+                    except nx.NetworkXNoPath:
+                        warnings.warn(
+                            "If this is called you need to check why this is happening."
+                        )
+                else:
+                    path_terminal = shortest_branch(
+                        g_temp, starts, new_terminal, path1
+                    )
+                if path_terminal:
+                    break
+            if len(tried) >= len(neighborhood):
+                # every reachable terminal tried and none routable -> give up on
+                # this entry rather than spinning forever
                 break
 
-        if kind != "idle":
-            # try to hang the branch off a better junction on the gate's path
-            shorter = shortest_branch(
-                g_temp, allowed_starts(key_tree, path1), new_terminal
-            )
-            if shorter is not None:
-                path_terminal = shorter
+        if not path_terminal:
+            continue
 
         reinsert(
             teleport_dct_update, key_tree, kind, source, new_terminal, path1, path_terminal
@@ -265,7 +320,7 @@ def perturbation(self, teleport_dct: dict, radius: int, vdp_dict: dict):
                     path_terminal = None
             else:
                 path_terminal = shortest_branch(
-                    g_tt, allowed_starts(key_tree, path1), terminal
+                    g_tt, allowed_starts(key_tree, path1), terminal, path1
                 )
 
             if path_terminal:

@@ -13,11 +13,16 @@ from cococo.animations import make_fine_sa_routing_animation
 
 from datetime import datetime
 
+from IPython.display import HTML
+from cococo.animations import make_clean_routing_html_animation
+import matplotlib as mpl
+
+
 seed = 45
 
 layout_type = "single"
 m = 8
-n = 12
+n = 8
 factories = []
 remove_edges = False
 g, data_qubit_locs, factory_ring = layouts.gen_layout_scalable(layout_type, m, n, factories, remove_edges)
@@ -31,8 +36,8 @@ t=2
 q = len(data_qubit_locs)
 print("number of data qubits: ", q)
 j = 8
-num_gates = 2 * q
-
+num_gates = 4 * q
+max_overlap = 5
 
 # j gates per layer on q qubits 
 # pairs indicate the qubit index (0, ..., q)
@@ -48,12 +53,13 @@ router = utils.BasicRouter(g, data_qubit_locs, factories, valid_path = "cc", t=t
 # each layer has disjoint logical support, however it doesn't guarantee that all those gates can be physically routed at the same time on the lattice
 layers = router.split_layer_terminal_pairs(terminal_pairs)
 vdp_layers, _ = router.find_total_vdp_layers_dyn(layers, data_qubit_locs, router.factory_times, layout, testing = True)
-print("Len of schedule without teleportation: ", len(vdp_layers))
+print("Len of schedule (standard): ", len(vdp_layers))
 
-#print_vdp_layers_with_qubit_labels(vdp_layers, layout)
+router2 = utils.TeleportationRouter(g, data_qubit_locs, factories, valid_path="cc", t=t, metric="exact", use_dag = True, seed =  49218  )
+router2.find_total_fine_grained_vdp_dyn(layers, data_qubit_locs, None, layout = layout, max_overlap = max_overlap, overlap_type = "strict_k", testing = True)
+print("Len of schedule (fine grained): ", len(router2.routes_by_layer))
 
-router = utils.TeleportationRouter(g, data_qubit_locs, factories, valid_path="cc", t=t, metric="exact", use_dag = True, seed =  49218  )
-layers = router.split_layer_terminal_pairs(terminal_pairs)
+router3 = utils.TeleportationRouter(g, data_qubit_locs, factories, valid_path="cc", t=t, metric="exact", use_dag = True, seed =  49218  )
 
 max_iters = 100
 T_start = 100.0
@@ -74,7 +80,55 @@ idle_move_type = "later"
 
 filename = f'../../Output_Files/schedule/schedule_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.pkl'
 
-schedule, _ = router.optimize_layers(        
+schedule, _ = router3.optimize_layers(
+        terminal_pairs,
+        layout,
+        max_iters,
+        T_start,
+        T_end,
+        alpha,
+        radius = radius,
+        k_lookahead = k_lookahead,
+        max_idle_teleport = max_idle_teleport,
+        steiner_init_type = steiner_init_type,
+        jump_harvesting = jump_harvesting,
+        reduce_teleport = reduce_teleport,
+        idle_move_type = idle_move_type,
+        vdp_type = "coarse",
+        overlap_type =  None,
+        max_overlap = None,
+        filename = filename,
+        include_steiner_teleport = True,
+        include_idle_teleport = False,
+        reduce_init_steiner = True,
+        reduce_init_idle = False,
+        stimtest = True,
+)
+
+
+print("Len of schedule (cs + sa): ", len(schedule))
+print("Reduction Delta: ", len(vdp_layers) - len(schedule))
+
+mpl.rcParams["animation.embed_limit"] = 100  # MB
+Path("animation").mkdir(exist_ok=True)
+filename = f"../../Output_Files/animation/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.html"
+
+anim = make_clean_routing_html_animation(
+    g,
+    schedule,
+    initial_layout=layout,
+    factories=factories,
+    figsize=(18, 8),
+    interval=900,
+    save_path = filename,
+)
+
+HTML(anim.to_jshtml())
+
+filename = f'../../Output_Files/schedule/schedule_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.pkl'
+
+router4 = utils.TeleportationRouter(g, data_qubit_locs, factories, valid_path="cc", t=t, metric="exact", use_dag = True, seed =  49218  )
+schedule, _ = router4.optimize_layers(        
         terminal_pairs,
         layout,
         max_iters,
@@ -90,7 +144,7 @@ schedule, _ = router.optimize_layers(
         idle_move_type = idle_move_type,
         vdp_type = "fine_grained",
         overlap_type =  "strict_k",
-        max_overlap = 5,
+        max_overlap = max_overlap,
         filename = filename,
         include_steiner_teleport = True,
         include_idle_teleport = False,
@@ -101,17 +155,9 @@ schedule, _ = router.optimize_layers(
 
 
 
-print("Len of schedule with teleport router: ", len(schedule))
+print("Len of schedule (fg+sa): ", len(schedule))
 print("Reduction Delta: ", len(vdp_layers) - len(schedule))
 
-idle_cnt = 0
-steiner_cnt = 0
-for i in range(len(schedule)):
-    if(schedule[i]["steiner"]):
-        steiner_cnt += len(schedule[i]["steiner"])
-    if(schedule[i]["idle_teleport"]):
-        idle_cnt += len(schedule[i]["idle_teleport"])    
-    
 
 
 Path("animation").mkdir(exist_ok=True)
