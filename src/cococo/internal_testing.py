@@ -329,17 +329,14 @@ def check_duplicate_nodes_per_layer(schedule):
     for i, layer in enumerate(schedule):
         vdp_dict = layer["vdp_dict"]
         steiner = layer["steiner"]
-        # collect all used nodes in a list
+        
         all_nodes = []
         for path in vdp_dict.values():
             all_nodes += path
         if steiner is not None:
             for path in steiner.values():
                 # do not include path[0] because this is already in vdp_dict
-                all_nodes += path[1][
-                    1:
-                ]  # the very first item is on the path, i.e. it would be duplicate by construction, this is not what we want to catch here
-        # check whether there are duplicate items, then problem!!
+                all_nodes += path[1][1:]  # the very first item is on the path, i.e. it would be duplicate by construction, this is not what we want to catch here
 
         seen = set()
         duplicates = [x for x in all_nodes if x in seen or seen.add(x)]
@@ -351,66 +348,83 @@ def check_duplicate_nodes_per_layer(schedule):
     # if no error was raised print that all is good
     return True
 
-def check_steiner_tree(steiner_dct: dict):
+def check_steiner_tree(steiner_dct: dict, vdp_dict: dict | None = None):
     """
-    check that steiner branch doesn't overlap in initialize_steiner
+    check that steiner branch doesn't overlap other branches and vdp_dict
+
     """
-    all_branch_nodes = set()
     all_vdp_nodes = set()
+    if vdp_dict is not None:
+        for path in vdp_dict.values():
+            all_vdp_nodes.update(path)
+    
 
     for key, (p1, p2) in steiner_dct.items():
-        all_vdp_nodes.update(p1)
-        all_branch_nodes.update(p2[1:])
+        if not p2:
+            raise ValueError(f"Steiner tree {key} has an empty branch.")
+        if p2[0] not in p1:
+            raise ValueError(
+                f"Steiner tree {key}: branch starts at {p2[0]}, which is not on its own path."
+            )
 
-    for key, (p1, p2) in steiner_dct.items():
-        #other_vdp_nodes = all_vdp_nodes.difference(p1)
-        other_branch_nodes = all_branch_nodes.difference(p2[1:])
+        other_branch_nodes = set()
+        for okey, (q1, q2) in steiner_dct.items():
+            if okey != key:
+                other_branch_nodes.update(q2[1:])
 
-        # this steiner branch cannot touch other steiner branch and all vdp nodes 
+        # this steiner branch cannot touch other steiner branch and all vdp nodes
         for node in p2[1:]:
             if node in all_vdp_nodes:
                 raise ValueError(
-                    f"Steiner branch overlaps with a VDP path at {node}"
+                    f"Steiner branch of {key} overlaps with a VDP path at {node}"
                 )
 
             if node in other_branch_nodes:
                 raise ValueError(
-                    f"Steiner branch overlaps with another Steiner branch at {node}"
+                    f"Steiner branch of {key} overlaps with another Steiner branch at {node}"
                 )
-            
-    return True 
+
+    return True
 
 def check_perturbation(teleport_dict: dict, vdp_dict: dict):
-   
+
     """
-    check that no path overlap after perturbation 
+    check that no path overlap after perturbation
+
+    perturbation only rewrites the steiner branch (p2) and the idle path
+    (p1 of an idle entry), so those are what is checked here: they must not
+    touch any vdp path, any other branch, or any other idle path.
     """
-    all_occupied_nodes = set()
 
-    for key, path in vdp_dict.items():
-        all_occupied_nodes.update(path)
-
-    for key, (p1, p2) in teleport_dict.items():
-        all_occupied_nodes.update(p1)
-        if len(key) == 3 and key[0] != "idle":
-            all_occupied_nodes.update(p2[1:])
-
-    for key, (p1, p2) in teleport_dict.items():
+    def own_nodes(key, p1, p2):
+        """
+        return branch for steiner tree (excluding T-junction) and idle path (excluding logical qubit) of the corresponding key 
+        """
         if key[0] == "idle":
-            other_occupied_nodes = all_occupied_nodes.difference(p1)
-            for node in p1:
-                if node in other_occupied_nodes:
-                    raise ValueError(
-                        f" Idle path overlaps with occupied nodes ! The duplicate elements are {node}"
-                    )    
-        elif len(key) == 3:
-            other_occupied_nodes = all_occupied_nodes.difference(p1 + p2)
-            for node in p1 + p2:
-                if node in other_occupied_nodes:
-                    raise ValueError(
-                        f" Steiner branch overlaps with occupied nodes ! The duplicate elements are {node}"
-                    )
-    return True 
+            return set(p1[1:])
+        return set(p2[1:])
+
+    
+    vdp_nodes = set()
+    for path in vdp_dict.values():
+        vdp_nodes.update(path)
+
+    for key, (p1, p2) in teleport_dict.items():
+        mine = own_nodes(key, p1, p2)
+
+        others = set(vdp_nodes)
+        # update for other steiner tree/idle path
+        for okey, (q1, q2) in teleport_dict.items():
+            if okey != key:
+                others.update(own_nodes(okey, q1, q2))
+
+        clash = mine & others
+        if clash:
+            what = "Idle path" if key[0] == "idle" else "Steiner branch"
+            raise ValueError(
+                f"{what} of {key} overlaps occupied nodes at {sorted(clash)}."
+            )
+    return True
 
 
 def test_duplicate_nodes_fg(routes_by_layer):
@@ -457,9 +471,9 @@ def test_steiner_no_overlap_fg(schedule):
     A valid layer requires every steiner branch to be node-disjoint from
       (a) every other steiner branch, and
       (b) every vdp_dict routing path,
-    with the sole exception of its own T-junction p2[0] (allowed to sit on a path
-    by construction). The routing paths are allowed to overlap each other across
-    phases (node capacity 2) and are not checked against one another here
+    with the sole exception of its own T-junction p2[0] . 
+    The routing paths are allowed to overlap each other acrossphases (node capacity 2) 
+    and are not checked against one another here
     (see test_duplicate_nodes_fg). Idle teleport / idle_back entries (string key
     head) are skipped.
     """

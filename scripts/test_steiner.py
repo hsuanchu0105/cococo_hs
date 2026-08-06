@@ -9,8 +9,7 @@ import cococo.layouts as layouts
 import cococo.utils_routing as utils
 import cococo.circuit_construction as circuit_construction
 import cococo.internal_testing as internal_testing
-import cococo.perturbation_refactored as pr
-utils.TeleportationRouter.perturbation = pr.perturbation
+
 
 from datetime import datetime
 

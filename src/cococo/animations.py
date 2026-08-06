@@ -1254,6 +1254,7 @@ def _draw_fine_sa_frame(
     title_prefix: str = "Fine-grained lattice-surgery routing + teleportation",
     show_active_labels: bool = True,
     show_move_text: bool = True,
+    text_gap: float = 0.015,
 ):
     """
     Draw one sub-frame of the combined fine-grained + SA animation.
@@ -1310,6 +1311,7 @@ def _draw_fine_sa_frame(
     ax.clear()
     ax.set_aspect("equal")
     ax.axis("off")
+    ax.margins(0.03)          # thin padding ring instead of the default 5%
 
     subtitle = (
         "routing (phase 1 solid green, phase 2 dashed blue)"
@@ -1504,7 +1506,7 @@ def _draw_fine_sa_frame(
             )
 
     # ------------------------------------------------------------------
-    # 7. Legend + move-text box (always expand ylim so frames don't jump)
+    # 7. Legend + move-text box
     # ------------------------------------------------------------------
     handles, _labels = ax.get_legend_handles_labels()
     if handles:
@@ -1519,14 +1521,14 @@ def _draw_fine_sa_frame(
         else:
             text = "No logical-qubit relocation in this layer"
 
-        x_min, x_max = ax.get_xlim()
-        y_min, y_max = ax.get_ylim()
-        y_range = y_max - y_min
-        ax.set_ylim(y_min - 0.22 * y_range, y_max)
+        # The box lives just under the axes in axes-fraction coordinates, so it
+        # costs no data space: the figure's bottom margin (sized in
+        # make_fine_sa_routing_animation) is exactly the strip it needs.
         ax.text(
-            x_min,
-            y_min - 0.08 * y_range,
+            0.0,
+            -text_gap,
             text,
+            transform=ax.transAxes,
             fontsize=10,
             ha="left",
             va="top",
@@ -1537,7 +1539,54 @@ def _draw_fine_sa_frame(
                 alpha=0.92,
             ),
             zorder=100,
+            clip_on=False,
         )
+
+
+def _fit_fine_sa_figure(
+    g: nx.Graph,
+    figsize: tuple[float, float],
+    *,
+    title_in: float,
+    bottom_in: float,
+    side_in: float,
+) -> tuple[tuple[float, float], dict[str, float]]:
+    """
+    Shrink `figsize` (read as a *maximum* width/height) to the aspect ratio of
+    the lattice, and return the matching subplot margins.
+
+    The axes uses aspect="equal", so any mismatch between the figure box and
+    the lattice box becomes dead white space -- which, in the .html player,
+    pushes the frame slider off-screen. Sizing the figure to the data instead
+    keeps the lattice as large as possible with only `title_in` above,
+    `bottom_in` below (the move-label strip) and `side_in` on each side.
+    """
+    graph_pos = nx.get_node_attributes(g, "pos")
+    if not graph_pos:
+        graph_pos = {node: node for node in g.nodes}
+    xs = [p[0] for p in graph_pos.values()]
+    ys = [p[1] for p in graph_pos.values()]
+
+    max_w, max_h = float(figsize[0]), float(figsize[1])
+    data_w = (max(xs) - min(xs)) or 1.0
+    data_h = (max(ys) - min(ys)) or 1.0
+
+    axes_w = max(max_w - 2 * side_in, 1.0)
+    axes_h = axes_w * data_h / data_w
+    avail_h = max(max_h - title_in - bottom_in, 1.0)
+    if axes_h > avail_h:                      # height-limited: give back width
+        axes_h = avail_h
+        axes_w = axes_h * data_w / data_h
+
+    fig_w = axes_w + 2 * side_in
+    fig_h = axes_h + title_in + bottom_in
+    margins = {
+        "left": side_in / fig_w,
+        "right": 1.0 - side_in / fig_w,
+        "bottom": bottom_in / fig_h,
+        "top": 1.0 - title_in / fig_h,
+    }
+    return (fig_w, fig_h), margins
 
 
 def make_fine_sa_routing_animation(
@@ -1553,6 +1602,8 @@ def make_fine_sa_routing_animation(
     show_move_text: bool = True,
     embed_limit_mb: int = 100,
     save_path: str | Path | None = None,
+    fit_figsize: bool = True,
+    dpi: float | None = None,
 ):
     """
     Combined animation for schedules from optimize_layers(vdp_type="fine_grained").
@@ -1575,6 +1626,17 @@ def make_fine_sa_routing_animation(
     next layer's frame A shows them at the new positions.
 
     save_path may end with .html, .gif or .mp4.
+
+    Sizing
+    ------
+    With fit_figsize=True (default) `figsize` is a *maximum* box: the figure is
+    shrunk to the aspect ratio of the lattice, leaving only a title strip on
+    top and a strip at the bottom sized to the busiest move-label box. That
+    keeps the .html player compact enough that its frame slider and buttons
+    stay on screen without zooming out. Pass fit_figsize=False for the old
+    behaviour (exact figsize, dead space around the lattice), and `dpi` to
+    trade on-screen size against resolution (the .html shows each frame at
+    figsize * dpi pixels).
     """
     mpl.rcParams["animation.embed_limit"] = embed_limit_mb
 
@@ -1596,8 +1658,33 @@ def make_fine_sa_routing_animation(
         if frame.move_events:
             seq.append((frame, fine_routes, "moves"))
 
-    fig, ax = plt.subplots(figsize=figsize)
-    #fig.subplots_adjust(right=0.82)
+    # Vertical budget: two title lines on top, and a strip at the bottom that
+    # holds the move-label box (one line per move in the busiest layer).
+    max_move_lines = max(
+        (len(frame.move_events) for frame, _fr, sub in seq if sub == "moves"),
+        default=1,
+    )
+    title_in = 0.75
+    bottom_in = (0.19 * max_move_lines + 0.18) if show_move_text else 0.10
+    side_in = 0.10
+    # never let the strips swallow the plot on a very short figure
+    bottom_in = min(bottom_in, 0.45 * figsize[1])
+    title_in = min(title_in, 0.25 * figsize[1])
+
+    if fit_figsize:
+        figsize, margins = _fit_fine_sa_figure(
+            g, figsize, title_in=title_in, bottom_in=bottom_in, side_in=side_in,
+        )
+    else:
+        margins = {
+            "left": side_in / figsize[0],
+            "right": 1.0 - side_in / figsize[0],
+            "bottom": bottom_in / figsize[1],
+            "top": 1.0 - title_in / figsize[1],
+        }
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi or mpl.rcParams["figure.dpi"])
+    fig.subplots_adjust(**margins)
 
     def update(k: int):
         frame, fine_routes, sub = seq[k]

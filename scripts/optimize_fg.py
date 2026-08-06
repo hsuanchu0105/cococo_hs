@@ -1,6 +1,9 @@
 import sys
 from pathlib import Path
 
+import matplotlib as mpl
+mpl.use("Agg")  # headless: this script only saves animations, never shows a GUI window
+
 project_root = Path.cwd().parent
 sys.path.insert(0, str(project_root / "src"))
 
@@ -15,7 +18,6 @@ from datetime import datetime
 
 from IPython.display import HTML
 from cococo.animations import make_clean_routing_html_animation
-import matplotlib as mpl
 
 
 seed = 45
@@ -36,7 +38,7 @@ t=2
 q = len(data_qubit_locs)
 print("number of data qubits: ", q)
 j = 8
-num_gates = 4 * q
+num_gates = 2 * q
 max_overlap = 5
 
 # j gates per layer on q qubits 

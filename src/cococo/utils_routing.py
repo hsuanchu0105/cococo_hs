@@ -51,9 +51,6 @@ class RouteInfo:
     ancilla_idx: int
     first_part: FirstPart = "control"
     # Allowed steiner T-junction index range [junction_lo, junction_hi] on `path`:
-    # the overlap-free region containing the committed ancilla. Filled by
-    # find_fine_grained_vdp once the layer's routing is final (paths/overlaps are
-    # stable only then); None before that / on routes from older pickles.
     junction_lo: int | None = None
     junction_hi: int | None = None
 
@@ -871,9 +868,12 @@ class BasicRouter:
             if path[i] in other_nodes:
                 if start is None:
                     start = i
+            # end of this block 
             elif start is not None:
                 blocks.append({"start": start, "end": i - 1})
+                # reset the start for the next block 
                 start = None
+        # last block 
         if start is not None:
             blocks.append({"start": start, "end": len(path) - 2})
         return blocks
@@ -1832,7 +1832,7 @@ class TeleportationRouter(BasicRouter):
 
         #print("steiner dict: ", steiner_dct)
         
-        tst.check_steiner_tree(steiner_dct)
+        tst.check_steiner_tree(steiner_dct, vdp_dict)
 
 
         return steiner_dct
@@ -1987,7 +1987,7 @@ class TeleportationRouter(BasicRouter):
         """
         Computes a perturbation of a given collection of paths within a given radius of edges around the current terminal.
 
-        For each path a new location of the 2nd (3rd terminal) is updated randomly.
+        For each path a new location of the terminal is updated randomly.
         """
 
         # ------------------------------------------------------------------
@@ -2020,7 +2020,7 @@ class TeleportationRouter(BasicRouter):
 
             ``("idle", q, t) -> ("idle", q, t)``, ``(a, b, t) -> ("cnot", None, t)``,
             ``(a, t) -> ("t", None, t)``.  `bad_key_error` is raised for anything
-            else (the two passes historically raise different exception types).
+            else
             """
             if key_tree[0] == "idle":
                 _, q, terminal = key_tree
@@ -2046,7 +2046,7 @@ class TeleportationRouter(BasicRouter):
             g = self.g.copy()
             g.remove_nodes_from(self.factory_pos)
 
-            # occupied ancillas from other paths 
+            # occupied ancillas from other paths, preserve current tree 
             other_paths = [
                 pos
                 for keyy, path_pair in siblings.items()
@@ -2059,13 +2059,6 @@ class TeleportationRouter(BasicRouter):
                 g.remove_nodes_from([x for x in self.logical_pos_temp if x != source])
             else:
                 g.remove_nodes_from([x for x in self.logical_pos_temp])
-                # NOTE: the gate's own path1 is deliberately left in the graph here.
-                # Removing it up front would also remove every candidate T-junction,
-                # so no junction other than the current one could ever be used as a
-                # dijkstra source.  `shortest_branch` strips path1 per candidate
-                # instead -- that keeps every junction usable while still forbidding
-                # the branch from running along path1.  The `node not in path_con`
-                # guard in the vdp sweep below is what keeps path1 alive here.
 
             protected = {terminal}
             if path2:
@@ -2073,7 +2066,7 @@ class TeleportationRouter(BasicRouter):
             other_paths = [node for node in other_paths if node not in protected]
             g.remove_nodes_from(other_paths)
 
-            # also need to delete paths in vdp_dict
+            # delete paths in vdp_dict
             path_con = path1 + path2 if path2 else path1
             for path_label, path in vdp_dict.items():
                 if isinstance(path_label, tuple) and path_label[0] == "idle_back":
@@ -2090,7 +2083,7 @@ class TeleportationRouter(BasicRouter):
 
         def allowed_starts(key_tree, path1):
             """
-            Candidate T-junction nodes on the gate's own path.  In fine-grained mode
+            Candidate T-junction nodes.  In fine-grained mode
             the junction may only sit in the committed ancilla's region.
             """
             allowed = None
@@ -2107,30 +2100,22 @@ class TeleportationRouter(BasicRouter):
 
             `g_full` still contains `path1`.  We strip `path1` once, then re-attach
             one candidate junction at a time: dijkstra started at `j` then cannot
-            step onto any other path1 node, because none of them are in the graph.
-            So `branch & set(path1) == {j}` holds by construction -- no cycle can
-            form when the branch is glued onto path1 -- while every candidate is
-            still reachable as a source.
+            step onto any other path1 node.
+            
             """
             if target in set(path1):
-                # The terminal already lies on the gate's own path, so it is part of
-                # the tree already and needs no branch -- same convention as
-                # `on_path_random` in initialize_steiner, which stores [terminal].
-                # Routing a real branch here would leave path1 and rejoin it at the
-                # terminal, i.e. close a cycle.  Only legal if the terminal is itself
-                # an allowed junction.
+                # The terminal already lies on the gate's own path, so it is part of the tree already and needs no branch 
                 return [target] if target in set(starts) else None
 
             best = None
-            g = g_full.copy()  # one copy total, not one per candidate
+            g = g_full.copy()  # one copy for all 
             g.remove_nodes_from(path1)  # target is not on path1, so it survives
 
             for j in starts:
                 if j not in g_full:
-                    # candidate removed for some other reason (e.g. occupied by
-                    # another route), so it cannot serve as a junction
+                    # candidate removed for some other reason (e.g. occupied by another route), so it cannot serve as a junction
                     continue
-
+                # add back node j 
                 neighbours = [n for n in g_full.neighbors(j) if n in g]
                 g.add_node(j)
                 g.add_edges_from((j, n) for n in neighbours)
@@ -2174,12 +2159,7 @@ class TeleportationRouter(BasicRouter):
         # (A) move every terminal to a random node in its radius-neighbourhood
         # ------------------------------------------------------------------
         for key_tree, (path1, path2) in teleport_dct.items():
-            kind, source, terminal = classify(
-                key_tree,
-                RuntimeError(
-                    "Something is wrong with the allocation of keys in the steiner_dict"
-                ),
-            )
+            kind, source, terminal = classify( key_tree, RuntimeError("Something is wrong with the allocation of keys in the steiner_dict") )
 
             g_temp = build_constraint_graph(
                 key_tree, kind, source, terminal, path1, path2,
@@ -2187,13 +2167,7 @@ class TeleportationRouter(BasicRouter):
             )
 
             # reachable nodes from terminal
-            neighborhood = sorted(
-                set(
-                    nx.single_source_shortest_path_length(
-                        g_temp, terminal, cutoff=radius
-                    ).keys()
-                )
-            )
+            neighborhood = sorted(set(nx.single_source_shortest_path_length(g_temp, terminal, cutoff=radius).keys()))
             if len(neighborhood) == 1:  # only the terminal itself -> nothing to move
                 continue
 
@@ -2207,31 +2181,22 @@ class TeleportationRouter(BasicRouter):
                 tried.add(new_terminal)
                 if new_terminal != terminal:  # do not want same terminal again
                     if kind == "idle":
-                        # the idle corridor is replaced wholesale, so it may reuse
-                        # its own old nodes -- no path1 restriction here
                         try:
                             path_terminal = nx.dijkstra_path(g_temp, source, new_terminal)
                         except nx.NetworkXNoPath:
-                            warnings.warn(
-                                "If this is called you need to check why this is happening."
-                            )
+                            warnings.warn("If this is called you need to check why this is happening.")
                     else:
-                        path_terminal = shortest_branch(
-                            g_temp, starts, new_terminal, path1
-                        )
+                        path_terminal = shortest_branch(g_temp, starts, new_terminal, path1)
                     if path_terminal:
                         break
                 if len(tried) >= len(neighborhood):
-                    # every reachable terminal tried and none routable -> give up on
-                    # this entry rather than spinning forever
+                    # every reachable terminal tried and none routable 
                     break
 
             if not path_terminal:
                 continue
 
-            reinsert(
-                teleport_dct_update, key_tree, kind, source, new_terminal, path1, path_terminal
-            )
+            reinsert(teleport_dct_update, key_tree, kind, source, new_terminal, path1, path_terminal)
 
         # ------------------------------------------------------------------
         # (B) (A) may miss shortenings, because a terminal moved in a later
@@ -2242,9 +2207,7 @@ class TeleportationRouter(BasicRouter):
             # do not want this reduction.
             teleport_dct_update_second = teleport_dct_update.copy()
             for key_tree, (path1, path2) in teleport_dct_update.items():
-                kind, source, terminal = classify(
-                    key_tree, ValueError("steiner dct keys are wrong.")
-                )
+                kind, source, terminal = classify(key_tree, ValueError("steiner dct keys are wrong."))
 
                 g_tt = build_constraint_graph(
                     key_tree, kind, source, terminal, path1, path2,
@@ -2263,10 +2226,7 @@ class TeleportationRouter(BasicRouter):
 
                 if path_terminal:
                     # same terminal as before -- only the branch is replaced
-                    reinsert(
-                        teleport_dct_update_second, key_tree, kind, source,
-                        terminal, path1, path_terminal,
-                    )
+                    reinsert(teleport_dct_update_second, key_tree, kind, source, terminal, path1, path_terminal)
         else:
             teleport_dct_update_second = teleport_dct_update
             g_tt = self.g.copy()
@@ -2896,6 +2856,7 @@ class TeleportationRouter(BasicRouter):
                 layer, logical_pos, self.factory_times
             )
             return vdp_dict, remainder, None
+        
         if vdp_type != "fine_grained":
             raise ValueError("`vdp_type` must be `coarse` or `fine_grained`")
         if self.factory_pos:
