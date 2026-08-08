@@ -2326,10 +2326,11 @@ class TeleportationRouter(BasicRouter):
         init_idle_dct: dict,
         max_iters: int,
         T_start: float,
-        T_end: float,
+        T_end: float, 
         alpha: int,
         k_lookahead: int,
         vdp_type: str, 
+        fine_routes, 
         overlap_type: str | None, 
         max_overlap: int | None,
         radius: int,
@@ -2446,8 +2447,15 @@ class TeleportationRouter(BasicRouter):
                 elif len(key_candidate) == 3:
                     (a, b, terminal) = key_candidate
                     # randomly choose whether we shift control to ancilla or target to ancilla
-                    move_type = random.choice(["target", "control"])
-                    move_type_lst_temp.update({(a, b, terminal): move_type})
+                    if vdp_type == "coarse":
+                        move_type = random.choice(["target", "control"])
+                    # in fine-grained method, we don't have choice for the move type 
+                    elif vdp_type == "fine_grained":
+                        ri = fine_routes[(a, b)]
+                        fp = getattr(ri, "first_part", None)
+                        move_type = "target" if fp == "control" else "control"
+                    
+                    move_type_lst_temp.update({(a, b, terminal): move_type}) 
                     old_pos = None
                     new_pos = None
                     if move_type == "target":
@@ -2495,6 +2503,8 @@ class TeleportationRouter(BasicRouter):
             # cool
             T = max(T_end, T * alpha)
             
+        
+
             
 
         # if there is no improvement possible at all, make sure you return a none best teleport
@@ -3138,6 +3148,7 @@ class TeleportationRouter(BasicRouter):
                     alpha,
                     k_lookahead,
                     vdp_type,
+                    fine_routes, 
                     overlap_type, 
                     max_overlap,
                     radius=radius,
